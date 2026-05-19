@@ -190,9 +190,10 @@ var SITE_REL   = '/sites/FX3GESTOLIDERANAEDESENVOLVIMENTOLTDA372';
 var LIBRARY    = 'Planejamento_Obras_RM_(ISAENERGIA)';
 var SP_API_BASE = SP_ORIGIN + SITE_REL + '/_api';
 
-// Scopes necessários: User.Read (Graph) + AllSites.Write (SharePoint)
-var LOGIN_SCOPES = ['User.Read', SP_ORIGIN + '/AllSites.Write'];
-var SP_SCOPES    = [SP_ORIGIN + '/AllSites.Write'];
+// Login inicial: apenas identidade do usuário
+var LOGIN_SCOPES = ['User.Read'];
+// SharePoint: .default pede todos os acessos configurados para o recurso SP
+var SP_SCOPES    = [SP_ORIGIN + '/.default'];
 
 // ── MSAL ─────────────────────────────────────────────────────────────────────
 // IMPORTANTE: msalApp é null até msalInit() ser chamado com sucesso.
@@ -236,6 +237,11 @@ function msalInit() {
         if (accounts.length > 0) currentAccount = accounts[0];
       }
       updateAuthUI();
+      // Se retornou de um consentimento SharePoint, avisa o usuário
+      if (sessionStorage.getItem('sp_consent_pending') === '1') {
+        sessionStorage.removeItem('sp_consent_pending');
+        if (currentAccount) setStatus('✓ Acesso ao SharePoint autorizado. Tente salvar novamente.');
+      }
     }).catch(function(e) {
       console.warn('MSAL redirect error:', e.message);
       updateAuthUI();
@@ -262,11 +268,17 @@ function authLogout() {
 }
 
 function getSpToken() {
-  if (!msalApp)         return Promise.reject(new Error('Biblioteca MSAL não carregou. Recarregue a página.'));
-  if (!currentAccount)  return Promise.reject(new Error('Não autenticado. Faça login primeiro.'));
-  return msalApp.acquireTokenSilent({ scopes: SP_SCOPES, account: currentAccount })
-    .catch(function() {
-      return msalApp.acquireTokenPopup({ scopes: SP_SCOPES, account: currentAccount });
+  if (!msalApp)        return Promise.reject(new Error('MSAL não inicializou. Recarregue a página.'));
+  if (!currentAccount) return Promise.reject(new Error('Faça login primeiro.'));
+  var req = { scopes: SP_SCOPES, account: currentAccount };
+  return msalApp.acquireTokenSilent(req)
+    .catch(function(e) {
+      // Token silencioso falhou — precisa de consentimento interativo
+      // Salva ação pendente e redireciona para consentimento
+      sessionStorage.setItem('sp_consent_pending', '1');
+      msalApp.acquireTokenRedirect(req);
+      // acquireTokenRedirect navega para fora — retorna promise que nunca resolve
+      return new Promise(function() {});
     })
     .then(function(resp) {
       currentAccount = resp.account;

@@ -327,14 +327,34 @@ function restaurarEstadoFormulario() {
   } catch(e) {}
 }
 
+// URL de admin consent para o administrador Microsoft 365 aprovar AllSites.Write
+var ADMIN_CONSENT_URL = 'https://login.microsoftonline.com/' + TENANT_ID
+  + '/adminconsent?client_id=' + CLIENT_ID
+  + '&redirect_uri=' + encodeURIComponent('https://radioliveira.github.io/gerenciamento_pt/');
+
+// Mostra a URL de admin consent quando o redirect não resolver o 403
+function mostrarAdminConsentUrl() {
+  alert('Permissão de escrita BLOQUEADA pelo tenant.\n\n'
+    + 'O administrador Microsoft 365 precisa aprovar o acesso.\n\n'
+    + 'Copie e envie o link abaixo para o administrador:\n\n'
+    + ADMIN_CONSENT_URL
+    + '\n\nApós o admin aprovar, você poderá salvar normalmente.');
+}
+
 // Força o redirect de consentimento para o SharePoint (AllSites.Write)
+// prompt:'consent' garante que a tela de consentimento apareça (não usa SSO silencioso)
 function forceSpConsent(pendingAction) {
   if (!msalApp || !currentAccount) return;
-  setStatus('&#128274; Salvando estado e redirecionando para autorização...');
+  setStatus('&#128274; Redirecionando para tela de autorização...');
   salvarEstadoFormulario();
   if (pendingAction) sessionStorage.setItem('sp_pending_action', pendingAction);
-  // forceRefresh garante que Azure AD não reuse token cacheado sem o escopo
-  msalApp.acquireTokenRedirect({ scopes: SP_SCOPES, account: currentAccount, forceRefresh: true });
+  // Marca que já tentamos o redirect — se der 403 de novo, mostramos URL de admin
+  sessionStorage.setItem('sp_consent_attempted', '1');
+  msalApp.acquireTokenRedirect({
+    scopes: SP_SCOPES,
+    account: currentAccount,
+    prompt: 'consent'   // força exibição da tela de consentimento, ignora SSO cache
+  });
 }
 
 function getSpToken(pendingAction) {
@@ -547,12 +567,20 @@ function salvarSharePoint() {
   }).catch(function(e) {
     setStatus('');
     var msg = e.message || '';
-    if (msg.indexOf('403') !== -1 || msg.toLowerCase().indexOf('acesso negado') !== -1 || msg.toLowerCase().indexOf('access denied') !== -1) {
-      if (confirm('Acesso negado (403) ao gravar no SharePoint.\n\n'
-        + 'O aplicativo ainda não recebeu permissão de ESCRITA.\n\n'
-        + 'Clique OK para autorizar agora — você será redirecionado para a página de login da Microsoft.\n'
-        + 'Após autorizar, o arquivo será salvo automaticamente.')) {
-        forceSpConsent('save');
+    var is403 = msg.indexOf('403') !== -1 || msg.toLowerCase().indexOf('acesso negado') !== -1 || msg.toLowerCase().indexOf('access denied') !== -1;
+    if (is403) {
+      var jaAttempted = sessionStorage.getItem('sp_consent_attempted');
+      sessionStorage.removeItem('sp_consent_attempted');
+      if (jaAttempted) {
+        // Redirect de consentimento já foi feito e ainda deu 403 → precisa de admin consent
+        mostrarAdminConsentUrl();
+      } else {
+        if (confirm('Acesso negado (403) ao gravar no SharePoint.\n\n'
+          + 'O aplicativo ainda não recebeu permissão de ESCRITA.\n\n'
+          + 'Clique OK para abrir a tela de autorização da Microsoft.\n'
+          + 'Após autorizar, o arquivo será salvo automaticamente.')) {
+          forceSpConsent('save');
+        }
       }
     } else {
       alert('Erro ao salvar no SharePoint:\n\n' + msg);
@@ -603,12 +631,19 @@ function abrirCarregarSP() {
   }).catch(function(e) {
     setStatus('');
     var msg = e.message || '';
-    if (msg.indexOf('403') !== -1 || msg.toLowerCase().indexOf('acesso negado') !== -1 || msg.toLowerCase().indexOf('access denied') !== -1) {
-      if (confirm('Acesso negado (403) ao ler o SharePoint.\n\n'
-        + 'O aplicativo ainda não recebeu permissão de ESCRITA/LEITURA.\n\n'
-        + 'Clique OK para autorizar agora — você será redirecionado para a página de login da Microsoft.\n'
-        + 'Após autorizar, a listagem será retomada automaticamente.')) {
-        forceSpConsent('load');
+    var is403 = msg.indexOf('403') !== -1 || msg.toLowerCase().indexOf('acesso negado') !== -1 || msg.toLowerCase().indexOf('access denied') !== -1;
+    if (is403) {
+      var jaAttempted = sessionStorage.getItem('sp_consent_attempted');
+      sessionStorage.removeItem('sp_consent_attempted');
+      if (jaAttempted) {
+        mostrarAdminConsentUrl();
+      } else {
+        if (confirm('Acesso negado (403) ao ler o SharePoint.\n\n'
+          + 'O aplicativo ainda não recebeu permissão de acesso.\n\n'
+          + 'Clique OK para abrir a tela de autorização da Microsoft.\n'
+          + 'Após autorizar, a listagem será retomada automaticamente.')) {
+          forceSpConsent('load');
+        }
       }
     } else if (msg.indexOf('404') !== -1 || msg.indexOf('does not exist') !== -1) {
       alert('Pasta não encontrada no SharePoint.\nSalve um arquivo primeiro para criar a estrutura de pastas.');

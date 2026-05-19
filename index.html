@@ -274,9 +274,6 @@ function authLogin() {
     alert('Erro de autenticação:\n' + msg + '\n\nAbra F12 → Console para detalhes.\nTente Ctrl+Shift+R para recarregar.');
     return;
   }
-
-function authLogin() {
-  if (!msalApp) { alert('Erro: biblioteca de autenticação não carregou. Recarregue a página.'); return; }
   msalApp.loginPopup({ scopes: LOGIN_SCOPES })
     .then(function(resp) {
       currentAccount = resp.account;

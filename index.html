@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gerenciamento de PT</title>
+<!-- MSAL.js 2.x — autenticação Microsoft sem backend -->
+<script src="https://alcdn.msauth.net/browser/2.38.4/js/msal-browser.min.js"></script>
+<!-- Teams JS SDK (opcional — só ativa se rodando dentro do Teams) -->
+<script src="https://res.cdn.office.net/teams-js/2.22.0/js/MicrosoftTeams.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,sans-serif;font-size:13px;background:#f0f0f0;height:100vh;overflow:hidden;display:flex;flex-direction:column}
+#app{display:flex;flex:1;overflow:hidden}
+#sidebar{width:220px;min-width:120px;max-width:400px;background:#2c3e50;color:#ecf0f1;display:flex;flex-direction:column;flex-shrink:0}
+#sidebar-header{padding:14px 16px;font-size:14px;font-weight:bold;background:#1a252f;border-bottom:1px solid #34495e}
+#auth-panel{padding:10px 12px;border-bottom:1px solid #34495e}
+#sidebar-menu{flex:1;overflow-y:auto;padding:8px 0}
+.menu-item{display:flex;align-items:center;gap:8px;padding:10px 16px;cursor:pointer;color:#bdc3c7;border-left:3px solid transparent}
+.menu-item:hover{background:#34495e;color:#ecf0f1}
+.menu-item.active{background:#34495e;color:#3498db;border-left-color:#3498db}
+#resizer{width:5px;background:#ccc;cursor:col-resize;flex-shrink:0}
+#resizer:hover{background:#3498db}
+#content{flex:1;display:flex;flex-direction:column;background:#fff;overflow:hidden;min-width:200px}
+#content-header{padding:10px 16px;background:#ecf0f1;border-bottom:1px solid #ccc;font-size:14px;font-weight:bold;color:#2c3e50}
+#content-body{flex:1;overflow:auto}
+#pt-toolbar{display:flex;align-items:center;gap:6px;padding:10px 12px;background:#f8f8f8;border-bottom:1px solid #ddd;flex-wrap:wrap}
+#pt-toolbar input{padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-size:12px;width:220px}
+.tb-sep{width:1px;background:#ddd;height:20px;margin:0 2px;flex-shrink:0}
+.btn{padding:5px 12px;border:1px solid #ccc;border-radius:4px;cursor:pointer;font-size:12px;background:#fff}
+.btn:hover{background:#e8e8e8}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn:disabled:hover{background:#fff}
+.btn-success{background:#27ae60;color:#fff;border-color:#219a52}
+.btn-success:hover:not(:disabled){background:#219a52}
+.btn-primary{background:#3498db;color:#fff;border-color:#2980b9}
+.btn-primary:hover:not(:disabled){background:#2980b9}
+.btn-sp{background:#0078d4;color:#fff;border-color:#006cbd}
+.btn-sp:hover:not(:disabled){background:#006cbd}
+.btn-sp-out{background:#fff;color:#0078d4;border-color:#0078d4}
+.btn-sp-out:hover:not(:disabled){background:#e6f2fb}
+.btn-danger{background:#e74c3c;color:#fff;border-color:#c0392b;padding:3px 8px;font-size:11px}
+.btn-edit{background:#f39c12;color:#fff;border-color:#d68910;padding:3px 8px;font-size:11px}
+#pt-table-area{padding:12px;overflow:auto}
+#pt-table-wrap{overflow-x:auto}
+table{border-collapse:collapse;min-width:100%;font-size:12px;white-space:nowrap}
+table th,table td{border:1px solid #ccc;padding:4px 6px;vertical-align:middle}
+table thead tr:first-child th{background:#2c3e50;color:#fff;text-align:center;font-size:13px;padding:8px;cursor:text}
+table thead tr:nth-child(2) th{background:#34495e;color:#ecf0f1;font-size:11px;white-space:normal;max-width:100px;text-align:center}
+table thead tr:nth-child(2) th.ac{background:#1a252f;width:80px;text-align:center}
+table tbody tr:nth-child(even){background:#f9f9f9}
+table tbody tr:hover{background:#eaf4fb}
+.ci{width:100%;border:none;background:transparent;font-size:12px;padding:2px 4px;outline:none}
+.ci:focus{background:#fffbe6;border-bottom:1px solid #3498db}
+.cs{width:100%;border:none;background:transparent;font-size:12px;padding:2px;outline:none;cursor:pointer}
+input[type=date].ci{min-width:110px}
+.hi{width:58px;letter-spacing:1px}
+.tw{display:flex;align-items:center;gap:4px;min-width:120px}
+.tw input{width:54px}
+.tw select{border:none;background:transparent;font-size:12px;cursor:pointer;outline:none;padding:1px 2px}
+.ac-cell{text-align:center;white-space:nowrap}
+.ac-cell button{margin:1px}
+.lc{min-width:140px;white-space:normal}
+.ll{width:100%;font-size:12px}
+.lr{display:flex;align-items:center;gap:4px;padding:1px 0}
+.lt{font-weight:bold;font-size:11px;min-width:20px;flex-shrink:0}
+.lt.T{color:#1a5276}
+.lt.S{color:#6e2f17}
+.li{flex:1;border:none;background:transparent;font-size:12px;outline:none;padding:1px 2px;min-width:60px}
+.li:focus{background:#fffbe6}
+.la{background:none;border:none;cursor:pointer;color:#27ae60;font-size:14px;padding:0 2px}
+.lr-btn{background:none;border:none;cursor:pointer;color:#e74c3c;font-size:13px;padding:0 2px}
+#add-row-area{padding:8px 12px;border-top:1px solid #eee;display:flex;align-items:center;gap:10px}
+#status-msg{font-size:11px;color:#27ae60}
+/* Modais */
+.modal-bg{display:none;position:absolute;inset:0;background:rgba(0,0,0,0.45);z-index:100;align-items:center;justify-content:center}
+.modal-bg.open{display:flex}
+.modal{background:#fff;border-radius:8px;padding:24px;min-width:320px;max-width:500px}
+.modal h3{font-size:15px;margin-bottom:10px;color:#2c3e50}
+.modal p{font-size:13px;color:#555;margin-bottom:16px;line-height:1.5}
+.modal-btns{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.fl{max-height:260px;overflow-y:auto;border:1px solid #ddd;border-radius:4px;margin:8px 0}
+.fi{padding:8px 12px;cursor:pointer;border-bottom:1px solid #f0f0f0;font-size:13px;display:flex;align-items:center;gap:8px}
+.fi:hover{background:#eaf4fb}
+.fi:last-child{border-bottom:none}
+/* Auth panel */
+#auth-user{font-size:11px;color:#bdc3c7;margin-bottom:6px;word-break:break-word}
+.auth-btn-login{font-size:12px;padding:6px 10px;width:100%;background:#0078d4;color:#fff;border:1px solid #006cbd;border-radius:4px;cursor:pointer}
+.auth-btn-login:hover{background:#006cbd}
+.auth-btn-logout{font-size:11px;padding:3px 10px;width:100%;background:#c0392b;color:#fff;border:1px solid #a93226;border-radius:4px;cursor:pointer}
+.auth-btn-logout:hover{background:#a93226}
+.sp-folder-hint{font-size:10px;color:#95a5a6;margin-top:6px;word-break:break-all}
+</style>
+</head>
+<body>
+<div id="app" style="position:relative">
+
+<!-- Modal: Carregar arquivo local -->
+<div class="modal-bg" id="mdl-load">
+  <div class="modal">
+    <h3>&#128194; Carregar planilha local</h3>
+    <p>Selecione um arquivo Excel (.xlsx) gerado por este sistema:</p>
+    <input type="file" id="inp-file" accept=".xlsx" style="font-size:13px;margin-bottom:16px;display:block">
+    <div class="modal-btns">
+      <button class="btn" onclick="closeModal('mdl-load')">Cancelar</button>
+      <button class="btn btn-primary" onclick="doLoad()">&#128194; Carregar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Carregar do SharePoint -->
+<div class="modal-bg" id="mdl-sp-load">
+  <div class="modal">
+    <h3>&#9729; Carregar do SharePoint</h3>
+    <p id="sp-load-desc" style="font-size:12px;color:#555;margin-bottom:4px">Selecione o arquivo:</p>
+    <div class="fl" id="sp-file-list"><div style="padding:12px;color:#888;font-size:12px">Buscando arquivos...</div></div>
+    <div class="modal-btns">
+      <button class="btn" onclick="closeModal('mdl-sp-load')">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Sidebar -->
+<div id="sidebar">
+  <div id="sidebar-header">&#128193; Sistema de Gestão</div>
+  <div id="auth-panel">
+    <div id="auth-bar">
+      <!-- preenchido por updateAuthUI() -->
+    </div>
+    <div id="sp-folder-info" class="sp-folder-hint" style="display:none"></div>
+  </div>
+  <div id="sidebar-menu">
+    <div class="menu-item active"><span>&#128221;</span><span>Gerenciamento de PT</span></div>
+  </div>
+</div>
+
+<div id="resizer"></div>
+
+<div id="content">
+  <div id="content-header">Gerenciamento de PT</div>
+  <div id="content-body">
+    <div id="pt-toolbar">
+      <span style="font-size:12px;color:#555;flex-shrink:0">Projeto:</span>
+      <input type="text" id="input-projeto" placeholder="Ex: Projeto 1001 - SE AAAAA" oninput="updateFolderInfo()">
+      <div class="tb-sep"></div>
+      <button class="btn" onclick="openModal('mdl-load')" title="Carregar arquivo XLSX do computador">&#128194; Local</button>
+      <button class="btn btn-success" onclick="baixarXLSX()" title="Baixar XLSX no computador">&#128190; Baixar</button>
+      <div class="tb-sep"></div>
+      <button class="btn btn-sp" id="btn-sp-save" onclick="salvarSharePoint()" disabled title="Salvar no SharePoint (requer login)">&#9729; Salvar SP</button>
+      <button class="btn btn-sp-out" id="btn-sp-load" onclick="abrirCarregarSP()" disabled title="Carregar do SharePoint (requer login)">&#9729; Carregar SP</button>
+    </div>
+    <div id="pt-table-area">
+      <div id="pt-table-wrap">
+        <table id="pt-table">
+          <thead>
+            <tr><th colspan="20" contenteditable="true" id="titulo-doc" style="cursor:text">TÍTULO DO DOCUMENTO — clique aqui para editar</th></tr>
+            <tr>
+              <th>Data Início</th><th>Hora Início</th><th>Data Término</th><th>Hora Término</th>
+              <th>Equipamentos Impedidos</th><th>Chaves Abertas e Bloqueadas</th>
+              <th>Condição do Ativo</th><th>Atividade</th><th>Risco de Desligamento</th>
+              <th>Equipamento Exposto ao Risco</th><th>Tempo de Retorno</th>
+              <th>Observação</th><th>Outras Condições</th><th>Contratada</th>
+              <th>Frequência</th><th>SGPMR / REA</th><th>PT PIO</th><th>PT SAP</th>
+              <th>Líder de Trabalho</th><th class="ac">Ações</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div id="add-row-area">
+      <button class="btn btn-success" onclick="addRow({})">&#43; Adicionar Linha</button>
+      <span id="status-msg"></span>
+    </div>
+  </div>
+</div>
+
+</div><!-- #app -->
+
+<script>
+// ── CONFIGURAÇÃO ─────────────────────────────────────────────────────────────
+// IDs do app registrado no Azure AD
+var CLIENT_ID  = '88f186ea-1637-4310-94d3-affeecbc493e';
+var TENANT_ID  = '3c43e06d-4815-433f-92b0-47c1d2e20798';
+
+// URL base do SharePoint
+var SP_ORIGIN  = 'https://fx3gestao.sharepoint.com';
+var SITE_REL   = '/sites/FX3GESTOLIDERANAEDESENVOLVIMENTOLTDA372';
+var LIBRARY    = 'Planejamento_Obras_RM_(ISAENERGIA)';
+var SP_API_BASE = SP_ORIGIN + SITE_REL + '/_api';
+
+// Scopes necessários: User.Read (Graph) + AllSites.Write (SharePoint)
+var LOGIN_SCOPES = ['User.Read', SP_ORIGIN + '/AllSites.Write'];
+var SP_SCOPES    = [SP_ORIGIN + '/AllSites.Write'];
+
+// ── MSAL ─────────────────────────────────────────────────────────────────────
+var msalApp = new msal.PublicClientApplication({
+  auth: {
+    clientId: CLIENT_ID,
+    authority: 'https://login.microsoftonline.com/' + TENANT_ID,
+    redirectUri: (window.location.href.split('?')[0].split('#')[0])
+  },
+  cache: {
+    cacheLocation: 'sessionStorage',
+    storeAuthStateInCookie: true
+  }
+});
+
+var currentAccount = null;
+
+function msalInit() {
+  // Trata retorno de redirect (caso o popup falhe e seja usado redirect)
+  msalApp.handleRedirectPromise().then(function(resp) {
+    if (resp && resp.account) {
+      currentAccount = resp.account;
+    } else {
+      var accounts = msalApp.getAllAccounts();
+      if (accounts.length > 0) currentAccount = accounts[0];
+    }
+    updateAuthUI();
+  }).catch(function(e) {
+    console.warn('MSAL handleRedirect error:', e.message);
+    updateAuthUI();
+  });
+
+  // Inicializa Teams SDK se disponível
+  if (window.microsoftTeams) {
+    microsoftTeams.app.initialize().catch(function(){});
+  }
+}
+
+function authLogin() {
+  msalApp.loginPopup({ scopes: LOGIN_SCOPES })
+    .then(function(resp) {
+      currentAccount = resp.account;
+      updateAuthUI();
+    })
+    .catch(function(e) {
+      if (e.errorCode === 'popup_window_error') {
+        // Popup bloqueado — tenta redirect
+        msalApp.loginRedirect({ scopes: LOGIN_SCOPES });
+      } else if (e.errorCode !== 'user_cancelled') {
+        alert('Erro no login: ' + e.message);
+      }
+    });
+}
+
+function authLogout() {
+  msalApp.logoutPopup({ account: currentAccount })
+    .then(function() {
+      currentAccount = null;
+      updateAuthUI();
+    })
+    .catch(function(e) {
+      console.warn('Logout error:', e);
+      currentAccount = null;
+      updateAuthUI();
+    });
+}
+
+function getSpToken() {
+  if (!currentAccount) return Promise.reject(new Error('Não autenticado. Faça login primeiro.'));
+  return msalApp.acquireTokenSilent({ scopes: SP_SCOPES, account: currentAccount })
+    .catch(function() {
+      return msalApp.acquireTokenPopup({ scopes: SP_SCOPES, account: currentAccount });
+    })
+    .then(function(resp) {
+      currentAccount = resp.account;
+      return resp.accessToken;
+    });
+}
+
+function updateAuthUI() {
+  var bar    = document.getElementById('auth-bar');
+  var spSave = document.getElementById('btn-sp-save');
+  var spLoad = document.getElementById('btn-sp-load');
+  if (!bar) return;
+
+  if (currentAccount) {
+    var name = currentAccount.name || currentAccount.username || 'Usuário';
+    bar.innerHTML =
+      '<div id="auth-user">&#128100; ' + escHtml(name) + '</div>'
+      + '<button class="auth-btn-logout" onclick="authLogout()">Sair da conta Microsoft</button>';
+    if (spSave) spSave.disabled = false;
+    if (spLoad) spLoad.disabled = false;
+    updateFolderInfo();
+  } else {
+    bar.innerHTML = '<button class="auth-btn-login" onclick="authLogin()">&#128274; Entrar com Microsoft</button>';
+    if (spSave) spSave.disabled = true;
+    if (spLoad) spLoad.disabled = true;
+    var fi = document.getElementById('sp-folder-info');
+    if (fi) fi.style.display = 'none';
+  }
+}
+
+// ── SHAREPOINT REST API ───────────────────────────────────────────────────────
+
+// Escapa caminho para o parâmetro decodedurl do SharePoint REST API
+function spParam(path) {
+  return encodeURIComponent("'" + path.replace(/'/g, "''") + "'");
+}
+
+function spFetch(method, url, body, token) {
+  var isRaw = body && (body instanceof ArrayBuffer || ArrayBuffer.isView(body));
+  var headers = {
+    'Authorization': 'Bearer ' + token,
+    'Accept': 'application/json;odata=verbose'
+  };
+  var opts = { method: method, headers: headers };
+  if (isRaw) {
+    headers['Content-Type'] = 'application/octet-stream';
+    opts.body = body;
+  } else if (body !== null && body !== undefined) {
+    headers['Content-Type'] = 'application/json;odata=verbose';
+    opts.body = JSON.stringify(body);
+  }
+  return fetch(url, opts).then(function(r) {
+    if (!r.ok) {
+      return r.text().then(function(t) {
+        var msg;
+        try {
+          var j = JSON.parse(t);
+          msg = (j.error && (j.error.message.value || j.error.message)) || r.statusText;
+        } catch(e) { msg = r.status + ' ' + r.statusText; }
+        throw new Error(msg);
+      });
+    }
+    return r.json().catch(function() { return {}; });
+  });
+}
+
+function spGet(endpoint, token) {
+  var url = endpoint.startsWith('http') ? endpoint : SP_API_BASE + '/' + endpoint;
+  return spFetch('GET', url, null, token);
+}
+
+function spPost(endpoint, body, token) {
+  var url = endpoint.startsWith('http') ? endpoint : SP_API_BASE + '/' + endpoint;
+  return spFetch('POST', url, body, token);
+}
+
+function spFolderExists(serverRelPath, token) {
+  var ep = 'web/GetFolderByServerRelativePath(decodedurl=@p)?@p=' + spParam(serverRelPath) + '&$select=Exists';
+  return spGet(ep, token)
+    .then(function() { return true; })
+    .catch(function() { return false; });
+}
+
+function spCreateFolder(serverRelPath, token) {
+  return spPost('web/folders', {
+    '__metadata': { 'type': 'SP.Folder' },
+    'ServerRelativeUrl': serverRelPath
+  }, token);
+}
+
+function spEnsureFolder(serverRelPath, token) {
+  // Não tenta criar nada acima da biblioteca
+  var libRoot = SITE_REL + '/' + LIBRARY;
+  if (!serverRelPath.startsWith(libRoot)) return Promise.resolve();
+
+  return spFolderExists(serverRelPath, token).then(function(exists) {
+    if (exists) return;
+    var parts = serverRelPath.replace(/\/$/, '').split('/');
+    var parent = parts.slice(0, -1).join('/');
+    return spEnsureFolder(parent, token).then(function() {
+      return spCreateFolder(serverRelPath, token);
+    });
+  });
+}
+
+function spListFiles(folderServerRelPath, token) {
+  var ep = 'web/GetFolderByServerRelativePath(decodedurl=@p)/Files?@p=' + spParam(folderServerRelPath)
+    + '&$select=Name,ServerRelativeUrl,TimeLastModified&$orderby=TimeLastModified%20desc';
+  return spGet(ep, token).then(function(data) {
+    return (data.d && data.d.results) ? data.d.results : [];
+  });
+}
+
+function spUploadFile(folderServerRelPath, filename, content, token) {
+  var url = SP_API_BASE + '/web/GetFolderByServerRelativePath(decodedurl=@p)/Files/add(url=@fn,overwrite=true)'
+    + '?@p=' + spParam(folderServerRelPath)
+    + '&@fn=' + spParam(filename);
+  return spPost(url, content, token);
+}
+
+function spDownloadFile(serverRelUrl, token) {
+  var url = SP_ORIGIN + '/_api/web/GetFileByServerRelativePath(decodedurl=@p)/$value?@p=' + spParam(serverRelUrl);
+  return fetch(url, { headers: { 'Authorization': 'Bearer ' + token } }).then(function(r) {
+    if (!r.ok) throw new Error('Download falhou: ' + r.status + ' ' + r.statusText);
+    return r.arrayBuffer();
+  });
+}
+
+// ── OPERAÇÕES SHAREPOINT ─────────────────────────────────────────────────────
+
+function getProjectFolderPath() {
+  var proj = (document.getElementById('input-projeto').value || '').trim();
+  if (!proj) return null;
+  return SITE_REL + '/' + LIBRARY + '/' + proj + '/Gerenciamento PT';
+}
+
+function updateFolderInfo() {
+  var fi = document.getElementById('sp-folder-info');
+  if (!fi || !currentAccount) return;
+  var p = getProjectFolderPath();
+  if (p) {
+    fi.style.display = 'block';
+    fi.textContent = '&#128193; ' + LIBRARY + '/' + (document.getElementById('input-projeto').value||'').trim() + '/Gerenciamento PT';
+  } else {
+    fi.style.display = 'none';
+  }
+}
+
+function salvarSharePoint() {
+  var proj  = (document.getElementById('input-projeto').value || '').trim();
+  if (!proj) { alert('Preencha o nome do Projeto antes de salvar.'); return; }
+  var ptSap = getPTSAP();
+  if (!ptSap) { alert('Preencha o campo PT SAP em pelo menos uma linha para nomear o arquivo.'); return; }
+
+  var titulo  = document.getElementById('titulo-doc').textContent || '';
+  var rows    = coletarLinhas();
+  var b64     = gerarXLSXBase64(titulo, rows);
+  var binary  = atob(b64);
+  var bytes   = new Uint8Array(binary.length);
+  for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+  var folderPath = getProjectFolderPath();
+  var filename   = ptSap + '.xlsx';
+
+  setStatus('&#8987; Conectando ao SharePoint...');
+  getSpToken().then(function(token) {
+    setStatus('&#8987; Verificando estrutura de pastas...');
+    return spEnsureFolder(folderPath, token).then(function() {
+      setStatus('&#8987; Verificando arquivo existente...');
+      return spListFiles(folderPath, token).then(function(files) {
+        var exists = files.some(function(f) { return f.Name === filename; });
+        var targetName = filename;
+
+        if (exists) {
+          var choice = confirm('"' + filename + '" já existe no SharePoint.\n\nOK = Substituir\nCancelar = Salvar como cópia');
+          if (!choice) {
+            var ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 16);
+            targetName = ptSap + '_' + ts + '.xlsx';
+          }
+        }
+
+        setStatus('&#8987; Enviando "' + targetName + '"...');
+        return spUploadFile(folderPath, targetName, bytes.buffer, token).then(function() {
+          setStatus('&#10003; Salvo no SharePoint: ' + targetName);
+        });
+      });
+    });
+  }).catch(function(e) {
+    setStatus('');
+    alert('Erro ao salvar no SharePoint:\n\n' + e.message);
+  });
+}
+
+function abrirCarregarSP() {
+  var proj = (document.getElementById('input-projeto').value || '').trim();
+  if (!proj) { alert('Preencha o nome do Projeto antes de carregar do SharePoint.'); return; }
+
+  setStatus('&#8987; Buscando arquivos no SharePoint...');
+  getSpToken().then(function(token) {
+    var folderPath = getProjectFolderPath();
+    return spListFiles(folderPath, token).then(function(files) {
+      setStatus('');
+      var descEl = document.getElementById('sp-load-desc');
+      if (descEl) descEl.textContent = 'Pasta: ' + proj + '/Gerenciamento PT';
+
+      var list = document.getElementById('sp-file-list');
+      list.innerHTML = '';
+
+      if (!files.length) {
+        list.innerHTML = '<div style="padding:12px;color:#888;font-size:12px">Nenhum arquivo encontrado nesta pasta.</div>';
+        openModal('mdl-sp-load');
+        return;
+      }
+
+      files.forEach(function(f) {
+        var dt = parseSpDate(f.TimeLastModified);
+        var div = document.createElement('div');
+        div.className = 'fi';
+        div.innerHTML = '<span style="font-size:18px">&#128196;</span>'
+          + '<div style="flex:1">'
+          +   '<div style="font-weight:bold;font-size:12px">' + escHtml(f.Name) + '</div>'
+          +   '<div style="font-size:11px;color:#888">' + dt + '</div>'
+          + '</div>';
+        var url = f.ServerRelativeUrl;
+        div.onclick = function() {
+          closeModal('mdl-sp-load');
+          carregarDoSP(url);
+        };
+        list.appendChild(div);
+      });
+      openModal('mdl-sp-load');
+    });
+  }).catch(function(e) {
+    setStatus('');
+    if (e.message.indexOf('404') !== -1 || e.message.indexOf('does not exist') !== -1) {
+      alert('Pasta não encontrada no SharePoint.\nSalve um arquivo primeiro para criar a estrutura de pastas.');
+    } else {
+      alert('Erro ao buscar arquivos:\n\n' + e.message);
+    }
+  });
+}
+
+function carregarDoSP(serverRelUrl) {
+  setStatus('&#8987; Baixando arquivo do SharePoint...');
+  getSpToken().then(function(token) {
+    return spDownloadFile(serverRelUrl, token).then(function(buf) {
+      try {
+        var data = parseXLSX(buf);
+        if (!data || data.length < 2) { alert('Arquivo incompatível.'); return; }
+        document.getElementById('titulo-doc').textContent = String(data[0]&&data[0][0]?data[0][0]:'SEM TÍTULO');
+        document.getElementById('tbody').innerHTML = '';
+        var count = 0;
+        for (var i = 2; i < data.length; i++) {
+          var r = data[i];
+          if (!r || r.every(function(c) { return !String(c||'').trim(); })) continue;
+          addRow({di:r[0],hi:r[1],dt:r[2],ht:r[3],ei:r[4],ca:r[5],co:r[6],at:r[7],
+            rd:r[8],er:r[9],tempo:r[10],ob:r[11],oc:r[12],ct:r[13],fr:r[14],
+            sg:r[15],pp:r[16],ps:r[17],lider:r[18]});
+          count++;
+        }
+        if (!count) addRow({});
+        var fname = serverRelUrl.split('/').pop();
+        setStatus('&#10003; Carregado do SharePoint: ' + fname + ' (' + count + ' linha' + (count!==1?'s':'') + ')');
+      } catch(err) {
+        alert('Erro ao processar arquivo: ' + err.message);
+      }
+    });
+  }).catch(function(e) {
+    setStatus('');
+    alert('Erro ao carregar do SharePoint:\n\n' + e.message);
+  });
+}
+
+function parseSpDate(v) {
+  if (!v) return '';
+  // OData ticks format: /Date(1234567890000)/
+  var m = String(v).match(/Date\((-?\d+)/);
+  if (m) return new Date(parseInt(m[1])).toLocaleString('pt-BR');
+  // ISO 8601
+  try { return new Date(v).toLocaleString('pt-BR'); } catch(e) { return String(v); }
+}
+
+function escHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── BAIXAR XLSX ───────────────────────────────────────────────────────────────
+function baixarXLSX(){
+  var titulo = document.getElementById('titulo-doc').textContent || 'SEM TITULO';
+  var rows = coletarLinhas();
+  var fname = (getPTSAP() || 'planilha_pt') + '.xlsx';
+  var b64 = gerarXLSXBase64(titulo, rows);
+  var a = document.createElement('a');
+  a.href = 'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,' + b64;
+  a.download = fname;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setStatus('&#10003; Baixado: ' + fname);
+}
+
+// ── GERADOR XLSX ──────────────────────────────────────────────────────────────
+function escXml(s){
+  return String(s||'')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+}
+
+function colLetter(n){
+  var s=''; n++;
+  while(n>0){s=String.fromCharCode(64+(n%26||26))+s;n=Math.floor((n-(n%26||26))/26);}
+  return s;
+}
+
+var CAB = ['Data Início','Hora Início','Data Término','Hora Término',
+  'Equipamentos Impedidos','Chaves Abertas e Bloqueadas','Condição do Ativo',
+  'Atividade','Risco de Desligamento','Equipamento Exposto ao Risco',
+  'Tempo de Retorno','Observação','Outras Condições','Contratada',
+  'Frequência','SGPMR / REA','PT PIO','PT SAP','Líder de Trabalho'];
+
+var WIDTHS = [6.27,6.27,6.27,6.27,6.27,6.27,6.27,6.27,6.27,6.27,6.27,6.27,6.27,6.27,6.27,6.27,6.27,6.27,6.27];
+var CENTERED = {0:1,1:1,2:1,3:1,6:1,8:1,9:1,13:1,15:1,16:1,17:1};
+
+function gerarXLSXBase64(titulo, rows){
+  var ss=[], ssMap={};
+  function si(v){ v=String(v||''); if(ssMap[v]===undefined){ssMap[v]=ss.length;ss.push(v);} return ssMap[v]; }
+
+  var stylesXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    +'<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+    +'<fonts count="3">'
+      +'<font><b/><sz val="16"/><color rgb="FF000000"/><name val="Arial"/></font>'
+      +'<font><b/><sz val="8"/><color rgb="FFECF0F1"/><name val="Arial"/></font>'
+      +'<font><sz val="8"/><color rgb="FF000000"/><name val="Arial"/></font>'
+    +'</fonts>'
+    +'<fills count="4">'
+      +'<fill><patternFill patternType="none"/></fill>'
+      +'<fill><patternFill patternType="gray125"/></fill>'
+      +'<fill><patternFill patternType="solid"><fgColor rgb="FF34495E"/><bgColor indexed="64"/></patternFill></fill>'
+      +'<fill><patternFill patternType="solid"><fgColor rgb="FFF9F9F9"/><bgColor indexed="64"/></patternFill></fill>'
+    +'</fills>'
+    +'<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+    +'<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+    +'<cellXfs count="6">'
+      +'<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
+      +'<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
+      +'<xf numFmtId="0" fontId="2" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>'
+      +'<xf numFmtId="0" fontId="2" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
+      +'<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>'
+      +'<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
+    +'</cellXfs>'
+    +'<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+    +'</styleSheet>';
+
+  var colsXml = '<cols>';
+  WIDTHS.forEach(function(w,i){ colsXml += '<col min="'+(i+1)+'" max="'+(i+1)+'" width="'+w+'" customWidth="1"/>'; });
+  colsXml += '</cols>';
+
+  var sheetRows = '';
+  sheetRows += '<row r="1" ht="30" customHeight="1"><c r="A1" t="s" s="0"><v>'+si(titulo)+'</v></c></row>';
+  sheetRows += '<row r="2" ht="36" customHeight="1">';
+  CAB.forEach(function(c,i){ sheetRows += '<c r="'+colLetter(i)+'2" t="s" s="1"><v>'+si(c)+'</v></c>'; });
+  sheetRows += '</row>';
+  rows.forEach(function(r, ri){
+    var excelRow = ri+3;
+    var isEven = ri%2===0;
+    sheetRows += '<row r="'+excelRow+'" ht="20" customHeight="1">';
+    r.forEach(function(val, ci){
+      var base = isEven ? 2 : 4;
+      var s = CENTERED[ci] ? base+1 : base;
+      sheetRows += '<c r="'+colLetter(ci)+excelRow+'" t="s" s="'+s+'"><v>'+si(val)+'</v></c>';
+    });
+    sheetRows += '</row>';
+  });
+
+  var mergeXml = '<mergeCells count="1"><mergeCell ref="A1:S1"/></mergeCells>';
+  var sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    +'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+    +'<sheetViews><sheetView workbookViewId="0" zoomScale="85" zoomScaleNormal="85" showGridLines="0">'
+    +'<pane ySplit="2" topLeftCell="A3" activePane="bottomLeft" state="frozen"/>'
+    +'</sheetView></sheetViews>'
+    +colsXml+'<sheetData>'+sheetRows+'</sheetData>'+mergeXml+'</worksheet>';
+
+  var ssXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    +'<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="'+ss.length+'" uniqueCount="'+ss.length+'">'
+    +ss.map(function(s){ return '<si><t xml:space="preserve">'+escXml(s)+'</t></si>'; }).join('')
+    +'</sst>';
+
+  var wbXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    +'<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+    +'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+    +'<sheets><sheet name="Gerenciamento PT" sheetId="1" r:id="rId1"/></sheets></workbook>';
+
+  var relsWb = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    +'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    +'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+    +'<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>'
+    +'<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+    +'</Relationships>';
+
+  var relsRoot = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    +'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    +'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+    +'</Relationships>';
+
+  var ct = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    +'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+    +'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+    +'<Default Extension="xml" ContentType="application/xml"/>'
+    +'<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+    +'<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+    +'<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>'
+    +'<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+    +'</Types>';
+
+  return buildZipBase64({
+    '[Content_Types].xml': ct,
+    '_rels/.rels': relsRoot,
+    'xl/workbook.xml': wbXml,
+    'xl/_rels/workbook.xml.rels': relsWb,
+    'xl/worksheets/sheet1.xml': sheetXml,
+    'xl/sharedStrings.xml': ssXml,
+    'xl/styles.xml': stylesXml
+  });
+}
+
+// ── CARREGAR XLSX LOCAL ───────────────────────────────────────────────────────
+function doLoad(){
+  var file = document.getElementById('inp-file').files[0];
+  if(!file){ alert('Selecione um arquivo .xlsx'); return; }
+  closeModal('mdl-load');
+  var reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      var data = parseXLSX(e.target.result);
+      if(!data||data.length<2){ alert('Arquivo incompatível. Use apenas planilhas geradas por este sistema.'); return; }
+      document.getElementById('titulo-doc').textContent = String(data[0]&&data[0][0]?data[0][0]:'SEM TÍTULO');
+      document.getElementById('tbody').innerHTML = '';
+      var count = 0;
+      for(var i=2;i<data.length;i++){
+        var r=data[i];
+        if(!r||r.every(function(c){return !String(c||'').trim();})) continue;
+        addRow({di:r[0],hi:r[1],dt:r[2],ht:r[3],ei:r[4],ca:r[5],co:r[6],at:r[7],
+          rd:r[8],er:r[9],tempo:r[10],ob:r[11],oc:r[12],ct:r[13],fr:r[14],
+          sg:r[15],pp:r[16],ps:r[17],lider:r[18]});
+        count++;
+      }
+      if(count===0) addRow({});
+      setStatus('&#10003; Carregado: '+file.name+' ('+count+' linha'+(count!==1?'s':'')+')');
+    }catch(err){ alert('Erro ao carregar: '+String(err)); }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// Parser XLSX simples (lê sharedStrings + sheet)
+function parseXLSX(buf){
+  var zip = unzipSimple(buf);
+  var ssXml = zip['xl/sharedStrings.xml']||'';
+  var shXml = zip['xl/worksheets/sheet1.xml']||'';
+  var ss=[];
+  ssXml.replace(/<t[^>]*>([^<]*)<\/t>/g,function(_,t){ss.push(t.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'"));});
+  var rows=[];
+  shXml.replace(/<row[^>]*>([\s\S]*?)<\/row>/g,function(_,rowContent){
+    var cells=[];
+    rowContent.replace(/<c r="([A-Z]+)\d+" [^>]*t="([^"]*)"[^>]*>[\s\S]*?<v>([^<]*)<\/v>/g,function(_,col,t,v){
+      var val = t==='s' ? (ss[parseInt(v)]||'') : v;
+      var ci = colToIndex(col);
+      cells[ci] = val;
+    });
+    rowContent.replace(/<c r="([A-Z]+)\d+"[^/][^>]*>[\s\S]*?<v>([^<]*)<\/v>/g,function(_,col,v){
+      var ci=colToIndex(col);
+      if(cells[ci]===undefined) cells[ci]=v;
+    });
+    rows.push(cells);
+  });
+  return rows;
+}
+
+function colToIndex(col){
+  var n=0;
+  for(var i=0;i<col.length;i++) n=n*26+(col.charCodeAt(i)-64);
+  return n-1;
+}
+
+// ── ZIP BUILDER ───────────────────────────────────────────────────────────────
+function strToUint8(s){ return new TextEncoder().encode(s); }
+
+function crc32(buf){
+  var t=[];
+  for(var i=0;i<256;i++){var c=i;for(var j=0;j<8;j++){c=c&1?(0xEDB88320^(c>>>1)):c>>>1;}t[i]=c;}
+  var crc=0xFFFFFFFF;
+  for(var k=0;k<buf.length;k++){crc=t[(crc^buf[k])&0xFF]^(crc>>>8);}
+  return (crc^0xFFFFFFFF)>>>0;
+}
+
+function u16(n){return [n&0xFF,(n>>8)&0xFF];}
+function u32(n){return [n&0xFF,(n>>8)&0xFF,(n>>16)&0xFF,(n>>24)&0xFF];}
+
+function buildZipBase64(files){
+  var out=[], offset=0, central=[];
+  Object.keys(files).forEach(function(name){
+    var data=strToUint8(files[name]);
+    var nb=strToUint8(name);
+    var crc=crc32(data);
+    var local=[0x50,0x4B,0x03,0x04,20,0,0,0,0,0,0,0,0,0]
+      .concat(u32(crc)).concat(u32(data.length)).concat(u32(data.length))
+      .concat(u16(nb.length)).concat([0,0]).concat(Array.from(nb)).concat(Array.from(data));
+    central.push({nb:Array.from(nb),crc:crc,size:data.length,offset:offset});
+    out=out.concat(local); offset+=local.length;
+  });
+  var cdStart=offset;
+  central.forEach(function(e){
+    var rec=[0x50,0x4B,0x01,0x02,20,0,20,0,0,0,0,0,0,0,0,0]
+      .concat(u32(e.crc)).concat(u32(e.size)).concat(u32(e.size))
+      .concat(u16(e.nb.length)).concat([0,0,0,0,0,0,0,0,0,0,0,0])
+      .concat(u32(e.offset)).concat(e.nb);
+    out=out.concat(rec);
+  });
+  var cdSize=out.length-cdStart;
+  out=out.concat([0x50,0x4B,0x05,0x06,0,0,0,0]
+    .concat(u16(central.length)).concat(u16(central.length))
+    .concat(u32(cdSize)).concat(u32(cdStart)).concat([0,0]));
+  var bin='';
+  for(var i=0;i<out.length;i++) bin+=String.fromCharCode(out[i]);
+  return btoa(bin);
+}
+
+function unzipSimple(buf){
+  var view=new DataView(buf), arr=new Uint8Array(buf), files={};
+  var i=0;
+  while(i<arr.length-4){
+    if(view.getUint32(i,true)===0x04034B50){
+      var fnLen=view.getUint16(i+26,true);
+      var exLen=view.getUint16(i+28,true);
+      var fn=new TextDecoder().decode(arr.slice(i+30,i+30+fnLen));
+      var dataStart=i+30+fnLen+exLen;
+      var compSize=view.getUint32(i+18,true);
+      var content=new TextDecoder('utf-8',{fatal:false}).decode(arr.slice(dataStart,dataStart+compSize));
+      files[fn]=content;
+      i=dataStart+compSize;
+    } else { i++; }
+  }
+  return files;
+}
+
+// ── TABELA ────────────────────────────────────────────────────────────────────
+function coletarLinhas(){
+  var res=[];
+  document.querySelectorAll('#tbody tr').forEach(function(tr){
+    var lider=[];
+    tr.querySelectorAll('.li').forEach(function(inp,i){
+      var v=(inp.value||'').trim();
+      if(v) lider.push((i===0?'(T) ':'(S) ')+v);
+    });
+    function g(col){ var el=tr.querySelector('[data-col="'+col+'"]'); return el?String(el.value||''):''; }
+    var tempo='';
+    var tw=tr.querySelector('.tw');
+    if(tw){
+      var ts=tw.querySelector('select'), ti=tw.querySelector('input');
+      tempo=(ts&&ts.value==='I')?'Indisponível':(ti?String(ti.value||''):'');
+    }
+    res.push([g('di'),g('hi'),g('dt'),g('ht'),g('ei'),g('ca'),g('co'),g('at'),
+      g('rd'),g('er'),tempo,g('ob'),g('oc'),g('ct'),g('fr'),g('sg'),g('pp'),g('ps'),
+      lider.join('\n')]);
+  });
+  return res;
+}
+
+function getPTSAP(){ var el=document.querySelector('[data-col="ps"]'); return el?String(el.value||'').trim():''; }
+function today(){ return new Date().toISOString().split('T')[0]; }
+
+function addRow(d){
+  d=d||{};
+  var tr=document.createElement('tr');
+  tr.innerHTML=
+    '<td><input type="date" class="ci" data-col="di" value="'+(d.di||today())+'"></td>'
+    +'<td><input type="text" class="ci hi" data-col="hi" value="'+(d.hi||'')+'" maxlength="6" placeholder="__:__"></td>'
+    +'<td><input type="date" class="ci" data-col="dt" value="'+(d.dt||today())+'"></td>'
+    +'<td><input type="text" class="ci hi" data-col="ht" value="'+(d.ht||'')+'" maxlength="6" placeholder="__:__"></td>'
+    +'<td><input type="text" class="ci" data-col="ei" value="'+(d.ei||'')+'"></td>'
+    +'<td><input type="text" class="ci" data-col="ca" value="'+(d.ca||'')+'"></td>'
+    +'<td>'+mkSel('co',d.co||'',['SD','CD','Isolado','Isolado e Aterrado','Religamento Bloqueado','Teste'])+'</td>'
+    +'<td><input type="text" class="ci" data-col="at" value="'+(d.at||'')+'"></td>'
+    +'<td>'+mkSel('rd',d.rd||'',['SIM','NÃO'])+'</td>'
+    +'<td><input type="text" class="ci" data-col="er" value="'+(d.er||'')+'"></td>'
+    +'<td>'+mkTempo(d.tempo||'')+'</td>'
+    +'<td><input type="text" class="ci" data-col="ob" value="'+(d.ob||'')+'"></td>'
+    +'<td><input type="text" class="ci" data-col="oc" value="'+(d.oc||'')+'"></td>'
+    +'<td><input type="text" class="ci" data-col="ct" value="'+(d.ct||'')+'"></td>'
+    +'<td>'+mkSel('fr',d.fr||'',['Diária','Contínua'])+'</td>'
+    +'<td><input type="text" class="ci" data-col="sg" value="'+(d.sg||'')+'"></td>'
+    +'<td><input type="text" class="ci" data-col="pp" value="'+(d.pp||'')+'"></td>'
+    +'<td><input type="text" class="ci" data-col="ps" value="'+(d.ps||'')+'"></td>'
+    +'<td class="lc">'+mkLider(d.lider||'')+'</td>'
+    +'<td class="ac-cell">'
+      +'<button class="btn btn-edit" onclick="editRow(this)">&#9998;</button>'
+      +'<button class="btn btn-danger" onclick="delRow(this)">&#128465;</button>'
+    +'</td>';
+  document.getElementById('tbody').appendChild(tr);
+  tr.querySelectorAll('.hi').forEach(maskHora);
+}
+
+function mkSel(col,val,opts){
+  var s='<select class="cs" data-col="'+col+'"><option value=""></option>';
+  opts.forEach(function(o){s+='<option'+(String(val||'')===o?' selected':'')+'>'+o+'</option>';});
+  return s+'</select>';
+}
+
+function mkTempo(val){
+  var ind=String(val||'')==='Indisponível';
+  return '<div class="tw">'
+    +'<input type="text" class="ci hi" maxlength="6" placeholder="__:__" value="'+(ind?'':String(val||''))+'" style="display:'+(ind?'none':'inline-block')+'">'
+    +'<select onchange="tgTempo(this)">'
+    +'<option value=""'+(!ind?' selected':'')+'>Horário</option>'
+    +'<option value="I"'+(ind?' selected':'')+'>Indisponível</option>'
+    +'</select></div>';
+}
+
+function mkLider(val){
+  var names=val?String(val).split(/[\n;]+/).map(function(n){return n.replace(/^\(T\) |^\(S\) /,'').trim();}).filter(Boolean):[''];
+  if(!names.length) names=[''];
+  var h='<div class="ll">';
+  names.forEach(function(n,i){
+    h+='<div class="lr"><span class="lt '+(i===0?'T':'S')+'">'+(i===0?'(T)':'(S)')+'</span>'
+      +'<input type="text" class="li" value="'+String(n||'').replace(/"/g,'&quot;')+'" placeholder="Nome...">'
+      +(i===0?'<button class="la" onclick="addLider(this)">&#43;</button>':'')
+      +'<button class="lr-btn" onclick="rmLider(this)">&#215;</button></div>';
+  });
+  return h+'</div>';
+}
+
+function tgTempo(sel){
+  var inp=sel.closest('.tw').querySelector('input');
+  inp.style.display=sel.value==='I'?'none':'inline-block';
+  if(sel.value==='I') inp.value='';
+}
+function addLider(btn){
+  var d=document.createElement('div');d.className='lr';
+  d.innerHTML='<span class="lt S">(S)</span><input type="text" class="li" placeholder="Nome..."><button class="lr-btn" onclick="rmLider(this)">&#215;</button>';
+  btn.closest('.ll').appendChild(d);
+}
+function rmLider(btn){
+  var list=btn.closest('.ll');
+  if(list.querySelectorAll('.lr').length===1){list.querySelector('.li').value='';return;}
+  btn.closest('.lr').remove();
+}
+function maskHora(inp){
+  inp.addEventListener('input',function(){
+    var v=this.value.replace(/\D/g,'');
+    if(v.length>=3) v=v.slice(0,2)+':'+v.slice(2,4);
+    this.value=v;
+  });
+  inp.addEventListener('blur',function(){
+    var v=this.value.replace(/[^\d]/g,'');
+    if(v.length===4) this.value=v.slice(0,2)+':'+v.slice(2)+'h';
+  });
+}
+function delRow(btn){if(!confirm('Excluir esta linha?'))return;btn.closest('tr').remove();}
+function editRow(btn){var f=btn.closest('tr').querySelector('input');if(f){f.focus();f.select();}}
+function openModal(id){document.getElementById(id).classList.add('open');}
+function closeModal(id){document.getElementById(id).classList.remove('open');}
+function setStatus(msg){
+  var s=document.getElementById('status-msg');
+  s.innerHTML=msg;
+  if(msg&&msg.indexOf('&#10003;')!==-1){
+    clearTimeout(s._t);
+    s._t=setTimeout(function(){s.textContent='';},7000);
+  }
+}
+
+// Resizer sidebar
+var rz=document.getElementById('resizer'),sb=document.getElementById('sidebar'),isR=false;
+rz.addEventListener('mousedown',function(){isR=true;document.body.style.cursor='col-resize';document.body.style.userSelect='none';});
+document.addEventListener('mousemove',function(e){if(!isR)return;var w=e.clientX-document.getElementById('app').getBoundingClientRect().left;sb.style.width=Math.min(400,Math.max(120,w))+'px';});
+document.addEventListener('mouseup',function(){if(!isR)return;isR=false;document.body.style.cursor='';document.body.style.userSelect='';});
+
+// Startup
+window.onload = function(){
+  addRow({});
+  msalInit();
+};
+</script>
+</body>
+</html>

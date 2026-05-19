@@ -1,0 +1,39 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.17/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.17",
+  "version": "1.0.0",
+  "id": "c4a8d3e2-6f1b-4a9c-8d5e-2b7f3a9c0e4d",
+  "packageName": "com.fx3gestao.gerenciamentopt",
+  "developer": {
+    "name": "FX3 Gestão",
+    "websiteUrl": "https://radioliveira.github.io/gerenciamento_pt/",
+    "privacyUrl": "https://radioliveira.github.io/gerenciamento_pt/",
+    "termsOfUseUrl": "https://radioliveira.github.io/gerenciamento_pt/"
+  },
+  "name": {
+    "short": "Gerenc. PT",
+    "full": "Gerenciamento de Permissão de Trabalho"
+  },
+  "description": {
+    "short": "Sistema de Gestão de PT para subestações elétricas.",
+    "full": "Gerenciamento de Permissão de Trabalho para obras em subestações elétricas. Salva e carrega planilhas diretamente no SharePoint da organização."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#2c3e50",
+  "staticTabs": [
+    {
+      "entityId": "gerenciamentoPT",
+      "name": "Gerenciamento PT",
+      "contentUrl": "https://radioliveira.github.io/gerenciamento_pt/",
+      "websiteUrl": "https://radioliveira.github.io/gerenciamento_pt/",
+      "scopes": ["personal"]
+    }
+  ],
+  "permissions": ["identity"],
+  "validDomains": [
+    "radioliveira.github.io"
+  ]
+}

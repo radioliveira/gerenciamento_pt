@@ -6,9 +6,9 @@
   "packageName": "com.fx3gestao.gerenciamentopt",
   "developer": {
     "name": "FX3 Gestão",
-    "websiteUrl": "https://radioliveira.github.io/gerenciamento_pt/",
-    "privacyUrl": "https://radioliveira.github.io/gerenciamento_pt/",
-    "termsOfUseUrl": "https://radioliveira.github.io/gerenciamento_pt/"
+    "websiteUrl": "https://fx3gestao.sharepoint.com/sites/FX3GESTOLIDERANAEDESENVOLVIMENTOLTDA372/Planejamento_Obras_RM_(ISAENERGIA)/SiteAssets/index.html",
+    "privacyUrl": "https://fx3gestao.sharepoint.com/sites/FX3GESTOLIDERANAEDESENVOLVIMENTOLTDA372/Planejamento_Obras_RM_(ISAENERGIA)/SiteAssets/index.html",
+    "termsOfUseUrl": "https://fx3gestao.sharepoint.com/sites/FX3GESTOLIDERANAEDESENVOLVIMENTOLTDA372/Planejamento_Obras_RM_(ISAENERGIA)/SiteAssets/index.html"
   },
   "name": {
     "short": "Gerenc. PT",
@@ -27,13 +27,13 @@
     {
       "entityId": "gerenciamentoPT",
       "name": "Gerenciamento PT",
-      "contentUrl": "https://radioliveira.github.io/gerenciamento_pt/",
-      "websiteUrl": "https://radioliveira.github.io/gerenciamento_pt/",
+      "contentUrl": "https://fx3gestao.sharepoint.com/sites/FX3GESTOLIDERANAEDESENVOLVIMENTOLTDA372/Planejamento_Obras_RM_(ISAENERGIA)/SiteAssets/index.html",
+      "websiteUrl": "https://fx3gestao.sharepoint.com/sites/FX3GESTOLIDERANAEDESENVOLVIMENTOLTDA372/Planejamento_Obras_RM_(ISAENERGIA)/SiteAssets/index.html",
       "scopes": ["personal"]
     }
   ],
   "permissions": ["identity"],
   "validDomains": [
-    "radioliveira.github.io"
+    "fx3gestao.sharepoint.com"
   ]
 }

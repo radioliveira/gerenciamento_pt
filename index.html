@@ -216,12 +216,11 @@ function msalInit() {
   }
 
   try {
-    var redirectUri = window.location.href.split('?')[0].split('#')[0];
     msalApp = new msalLib.PublicClientApplication({
       auth: {
         clientId: CLIENT_ID,
         authority: 'https://login.microsoftonline.com/' + TENANT_ID,
-        redirectUri: redirectUri
+        redirectUri: 'https://radioliveira.github.io/gerenciamento_pt/'
       },
       cache: {
         cacheLocation: 'sessionStorage',

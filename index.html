@@ -129,6 +129,7 @@ input[type=date].ci{min-width:110px}
       <button class="auth-btn-login" onclick="authLogin()">&#128274; Entrar com Microsoft</button>
     </div>
     <div id="sp-folder-info" class="sp-folder-hint" style="display:none"></div>
+    <div id="msal-debug" style="font-size:9px;color:#e67e22;padding:4px 0;word-break:break-all;display:none"></div>
   </div>
   <div id="sidebar-menu">
     <div class="menu-item active"><span>&#128221;</span><span>Gerenciamento de PT</span></div>
@@ -200,25 +201,39 @@ var SP_SCOPES    = [SP_ORIGIN + '/AllSites.Write'];
 var msalApp = null;
 var currentAccount = null;
 
+function msalDebug(msg) {
+  var el = document.getElementById('msal-debug');
+  if (el) el.innerHTML += '<div>' + msg + '</div>';
+  console.log('[MSAL]', msg);
+}
+
 function msalInit() {
+  msalDebug('msalInit iniciado');
+
   // Inicializa Teams SDK se disponível
   if (window.microsoftTeams) {
     try { microsoftTeams.app.initialize(); } catch(e) {}
   }
 
-  // Verifica se o CDN do MSAL carregou
-  if (typeof msal === 'undefined') {
-    console.error('MSAL CDN não carregou. Verifique conexão ou bloqueio de script.');
+  // Usa window.msal explicitamente (mais seguro que a referência global)
+  var msalLib = window.msal;
+  msalDebug('typeof window.msal = ' + typeof msalLib);
+
+  if (!msalLib || typeof msalLib.PublicClientApplication !== 'function') {
+    msalDebug('ERRO: window.msal nao disponivel ou PublicClientApplication ausente');
     updateAuthUI();
     return;
   }
 
   try {
-    msalApp = new msal.PublicClientApplication({
+    var redirectUri = window.location.href.split('?')[0].split('#')[0];
+    msalDebug('redirectUri = ' + redirectUri);
+
+    msalApp = new msalLib.PublicClientApplication({
       auth: {
         clientId: CLIENT_ID,
         authority: 'https://login.microsoftonline.com/' + TENANT_ID,
-        redirectUri: window.location.href.split('?')[0].split('#')[0]
+        redirectUri: redirectUri
       },
       cache: {
         cacheLocation: 'sessionStorage',
@@ -226,26 +241,39 @@ function msalInit() {
       }
     });
 
+    msalDebug('PublicClientApplication criado com sucesso');
+
     // Trata retorno de redirect (caso popup seja bloqueado e use redirect)
     msalApp.handleRedirectPromise().then(function(resp) {
+      msalDebug('handleRedirectPromise ok, conta: ' + (resp && resp.account ? resp.account.username : 'nenhuma'));
       if (resp && resp.account) {
         currentAccount = resp.account;
       } else {
         var accounts = msalApp.getAllAccounts();
+        msalDebug('contas no cache: ' + accounts.length);
         if (accounts.length > 0) currentAccount = accounts[0];
       }
       updateAuthUI();
     }).catch(function(e) {
-      console.warn('MSAL handleRedirect error:', e.message);
+      msalDebug('ERRO handleRedirect: ' + e.message);
       updateAuthUI();
     });
 
   } catch(e) {
-    console.error('Erro ao inicializar MSAL:', e.message);
+    msalDebug('ERRO ao criar PublicClientApplication: ' + e.message);
     msalApp = null;
     updateAuthUI();
   }
 }
+
+function authLogin() {
+  var msalLib = window.msal;
+  if (!msalApp) {
+    var msg = 'msalApp=null | window.msal=' + typeof msalLib;
+    if (msalLib) msg += ' | PCA=' + typeof msalLib.PublicClientApplication;
+    alert('Erro de autenticação:\n' + msg + '\n\nAbra F12 → Console para detalhes.\nTente Ctrl+Shift+R para recarregar.');
+    return;
+  }
 
 function authLogin() {
   if (!msalApp) { alert('Erro: biblioteca de autenticação não carregou. Recarregue a página.'); return; }
@@ -962,6 +990,9 @@ document.addEventListener('mouseup',function(){if(!isR)return;isR=false;document
 // Startup
 window.onload = function(){
   addRow({});
+  // Mostra painel de debug
+  var dbg = document.getElementById('msal-debug');
+  if (dbg) dbg.style.display = 'block';
   msalInit();
 };
 </script>

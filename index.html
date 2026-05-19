@@ -125,7 +125,8 @@ input[type=date].ci{min-width:110px}
   <div id="sidebar-header">&#128193; Sistema de Gestão</div>
   <div id="auth-panel">
     <div id="auth-bar">
-      <!-- preenchido por updateAuthUI() -->
+      <!-- Botão padrão — JS sobrescreve após MSAL carregar -->
+      <button class="auth-btn-login" onclick="authLogin()">&#128274; Entrar com Microsoft</button>
     </div>
     <div id="sp-folder-info" class="sp-folder-hint" style="display:none"></div>
   </div>

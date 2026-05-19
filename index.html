@@ -194,42 +194,60 @@ var LOGIN_SCOPES = ['User.Read', SP_ORIGIN + '/AllSites.Write'];
 var SP_SCOPES    = [SP_ORIGIN + '/AllSites.Write'];
 
 // ── MSAL ─────────────────────────────────────────────────────────────────────
-var msalApp = new msal.PublicClientApplication({
-  auth: {
-    clientId: CLIENT_ID,
-    authority: 'https://login.microsoftonline.com/' + TENANT_ID,
-    redirectUri: (window.location.href.split('?')[0].split('#')[0])
-  },
-  cache: {
-    cacheLocation: 'sessionStorage',
-    storeAuthStateInCookie: true
-  }
-});
-
+// IMPORTANTE: msalApp é null até msalInit() ser chamado com sucesso.
+// NÃO instanciar no nível global — se o CDN ainda não carregou, trava tudo.
+var msalApp = null;
 var currentAccount = null;
 
 function msalInit() {
-  // Trata retorno de redirect (caso o popup falhe e seja usado redirect)
-  msalApp.handleRedirectPromise().then(function(resp) {
-    if (resp && resp.account) {
-      currentAccount = resp.account;
-    } else {
-      var accounts = msalApp.getAllAccounts();
-      if (accounts.length > 0) currentAccount = accounts[0];
-    }
-    updateAuthUI();
-  }).catch(function(e) {
-    console.warn('MSAL handleRedirect error:', e.message);
-    updateAuthUI();
-  });
-
   // Inicializa Teams SDK se disponível
   if (window.microsoftTeams) {
-    microsoftTeams.app.initialize().catch(function(){});
+    try { microsoftTeams.app.initialize(); } catch(e) {}
+  }
+
+  // Verifica se o CDN do MSAL carregou
+  if (typeof msal === 'undefined') {
+    console.error('MSAL CDN não carregou. Verifique conexão ou bloqueio de script.');
+    updateAuthUI();
+    return;
+  }
+
+  try {
+    msalApp = new msal.PublicClientApplication({
+      auth: {
+        clientId: CLIENT_ID,
+        authority: 'https://login.microsoftonline.com/' + TENANT_ID,
+        redirectUri: window.location.href.split('?')[0].split('#')[0]
+      },
+      cache: {
+        cacheLocation: 'sessionStorage',
+        storeAuthStateInCookie: true
+      }
+    });
+
+    // Trata retorno de redirect (caso popup seja bloqueado e use redirect)
+    msalApp.handleRedirectPromise().then(function(resp) {
+      if (resp && resp.account) {
+        currentAccount = resp.account;
+      } else {
+        var accounts = msalApp.getAllAccounts();
+        if (accounts.length > 0) currentAccount = accounts[0];
+      }
+      updateAuthUI();
+    }).catch(function(e) {
+      console.warn('MSAL handleRedirect error:', e.message);
+      updateAuthUI();
+    });
+
+  } catch(e) {
+    console.error('Erro ao inicializar MSAL:', e.message);
+    msalApp = null;
+    updateAuthUI();
   }
 }
 
 function authLogin() {
+  if (!msalApp) { alert('Erro: biblioteca de autenticação não carregou. Recarregue a página.'); return; }
   msalApp.loginPopup({ scopes: LOGIN_SCOPES })
     .then(function(resp) {
       currentAccount = resp.account;
@@ -237,7 +255,6 @@ function authLogin() {
     })
     .catch(function(e) {
       if (e.errorCode === 'popup_window_error') {
-        // Popup bloqueado — tenta redirect
         msalApp.loginRedirect({ scopes: LOGIN_SCOPES });
       } else if (e.errorCode !== 'user_cancelled') {
         alert('Erro no login: ' + e.message);
@@ -246,6 +263,7 @@ function authLogin() {
 }
 
 function authLogout() {
+  if (!msalApp) return;
   msalApp.logoutPopup({ account: currentAccount })
     .then(function() {
       currentAccount = null;
@@ -259,7 +277,8 @@ function authLogout() {
 }
 
 function getSpToken() {
-  if (!currentAccount) return Promise.reject(new Error('Não autenticado. Faça login primeiro.'));
+  if (!msalApp)         return Promise.reject(new Error('Biblioteca MSAL não carregou. Recarregue a página.'));
+  if (!currentAccount)  return Promise.reject(new Error('Não autenticado. Faça login primeiro.'));
   return msalApp.acquireTokenSilent({ scopes: SP_SCOPES, account: currentAccount })
     .catch(function() {
       return msalApp.acquireTokenPopup({ scopes: SP_SCOPES, account: currentAccount });

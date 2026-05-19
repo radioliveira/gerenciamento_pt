@@ -87,6 +87,8 @@ input[type=date].ci{min-width:110px}
 #auth-user{font-size:11px;color:#bdc3c7;margin-bottom:6px;word-break:break-word}
 .auth-btn-login{font-size:12px;padding:6px 10px;width:100%;background:#0078d4;color:#fff;border:1px solid #006cbd;border-radius:4px;cursor:pointer}
 .auth-btn-login:hover{background:#006cbd}
+.auth-btn-consent{font-size:11px;padding:4px 10px;width:100%;background:#27ae60;color:#fff;border:1px solid #1e8449;border-radius:4px;cursor:pointer;margin-bottom:4px}
+.auth-btn-consent:hover{background:#1e8449}
 .auth-btn-logout{font-size:11px;padding:3px 10px;width:100%;background:#c0392b;color:#fff;border:1px solid #a93226;border-radius:4px;cursor:pointer}
 .auth-btn-logout:hover{background:#a93226}
 .sp-folder-hint{font-size:10px;color:#95a5a6;margin-top:6px;word-break:break-all}
@@ -273,6 +275,15 @@ function authLogout() {
   msalApp.logoutRedirect({ account: currentAccount });
 }
 
+// Força o redirect de consentimento para o SharePoint (AllSites.Write)
+function forceSpConsent(pendingAction) {
+  if (!msalApp || !currentAccount) return;
+  setStatus('&#128274; Redirecionando para autorização de escrita no SharePoint...');
+  if (pendingAction) sessionStorage.setItem('sp_pending_action', pendingAction);
+  // forceRefresh garante que Azure AD não reuse token cacheado sem o escopo
+  msalApp.acquireTokenRedirect({ scopes: SP_SCOPES, account: currentAccount, forceRefresh: true });
+}
+
 function getSpToken(pendingAction) {
   if (!msalApp)        return Promise.reject(new Error('MSAL não inicializou. Recarregue a página.'));
   if (!currentAccount) return Promise.reject(new Error('Faça login primeiro.'));
@@ -280,10 +291,8 @@ function getSpToken(pendingAction) {
   return msalApp.acquireTokenSilent(req)
     .catch(function(e) {
       // Token silencioso falhou — precisa de consentimento interativo
-      // Guarda qual ação estava pendente para retomar após o redirect
       if (pendingAction) sessionStorage.setItem('sp_pending_action', pendingAction);
       msalApp.acquireTokenRedirect(req);
-      // acquireTokenRedirect navega para fora — retorna promise que nunca resolve
       return new Promise(function() {});
     })
     .then(function(resp) {
@@ -303,6 +312,7 @@ function updateAuthUI() {
     var name = currentAccount.name || currentAccount.username || 'Usuário';
     bar.innerHTML =
       '<div id="auth-user">&#128100; ' + escHtml(name) + '</div>'
+      + '<button class="auth-btn-consent" onclick="forceSpConsent(\'\')" title="Clique se receber erro de acesso negado ao salvar/carregar">&#128275; Autorizar Escrita SP</button>'
       + '<button class="auth-btn-logout" onclick="authLogout()">Sair da conta Microsoft</button>';
     if (spSave) spSave.disabled = false;
     if (spLoad) spLoad.disabled = false;
@@ -482,7 +492,17 @@ function salvarSharePoint() {
     });
   }).catch(function(e) {
     setStatus('');
-    alert('Erro ao salvar no SharePoint:\n\n' + e.message);
+    var msg = e.message || '';
+    if (msg.indexOf('403') !== -1 || msg.toLowerCase().indexOf('acesso negado') !== -1 || msg.toLowerCase().indexOf('access denied') !== -1) {
+      if (confirm('Acesso negado (403) ao gravar no SharePoint.\n\n'
+        + 'O aplicativo ainda não recebeu permissão de ESCRITA.\n\n'
+        + 'Clique OK para autorizar agora — você será redirecionado para a página de login da Microsoft.\n'
+        + 'Após autorizar, o arquivo será salvo automaticamente.')) {
+        forceSpConsent('save');
+      }
+    } else {
+      alert('Erro ao salvar no SharePoint:\n\n' + msg);
+    }
   });
 }
 
@@ -528,10 +548,18 @@ function abrirCarregarSP() {
     });
   }).catch(function(e) {
     setStatus('');
-    if (e.message.indexOf('404') !== -1 || e.message.indexOf('does not exist') !== -1) {
+    var msg = e.message || '';
+    if (msg.indexOf('403') !== -1 || msg.toLowerCase().indexOf('acesso negado') !== -1 || msg.toLowerCase().indexOf('access denied') !== -1) {
+      if (confirm('Acesso negado (403) ao ler o SharePoint.\n\n'
+        + 'O aplicativo ainda não recebeu permissão de ESCRITA/LEITURA.\n\n'
+        + 'Clique OK para autorizar agora — você será redirecionado para a página de login da Microsoft.\n'
+        + 'Após autorizar, a listagem será retomada automaticamente.')) {
+        forceSpConsent('load');
+      }
+    } else if (msg.indexOf('404') !== -1 || msg.indexOf('does not exist') !== -1) {
       alert('Pasta não encontrada no SharePoint.\nSalve um arquivo primeiro para criar a estrutura de pastas.');
     } else {
-      alert('Erro ao buscar arquivos:\n\n' + e.message);
+      alert('Erro ao buscar arquivos:\n\n' + msg);
     }
   });
 }

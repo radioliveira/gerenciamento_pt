@@ -238,16 +238,18 @@ function msalInit() {
         if (accounts.length > 0) currentAccount = accounts[0];
       }
       updateAuthUI();
-      // Se retornou de um consentimento SharePoint, retoma a ação pendente automaticamente
+      // Restaura estado do formulário se havia redirect de consentimento
+      restaurarEstadoFormulario();
+      // Retoma a ação pendente automaticamente após consentimento
       var pendingAction = sessionStorage.getItem('sp_pending_action');
       if (pendingAction) {
         sessionStorage.removeItem('sp_pending_action');
         if (currentAccount) {
-          setStatus('✓ Acesso ao SharePoint autorizado. Retomando ação...');
+          setStatus('&#10003; Acesso ao SharePoint autorizado. Retomando ação...');
           setTimeout(function() {
             if (pendingAction === 'save') salvarSharePoint();
             else if (pendingAction === 'load') abrirCarregarSP();
-          }, 800);
+          }, 1200);
         }
       }
     }).catch(function(e) {
@@ -275,10 +277,61 @@ function authLogout() {
   msalApp.logoutRedirect({ account: currentAccount });
 }
 
+// ── SALVAR/RESTAURAR ESTADO DO FORMULÁRIO (para sobreviver ao redirect MSAL) ───
+
+function salvarEstadoFormulario() {
+  try {
+    var estado = {
+      projeto: (document.getElementById('input-projeto').value || '').trim(),
+      rows: []
+    };
+    document.querySelectorAll('#tbody tr').forEach(function(tr) {
+      var row = {};
+      ['di','hi','dt','ht','ei','ca','co','at','rd','er','ob','oc','ct','fr','sg','pp','ps'].forEach(function(col) {
+        var el = tr.querySelector('[data-col="' + col + '"]');
+        if (el) row[col] = el.value || '';
+      });
+      var tw = tr.querySelector('.tw');
+      if (tw) {
+        var ts = tw.querySelector('select'), ti = tw.querySelector('input');
+        row.tempo = (ts && ts.value === 'I') ? 'Indisponível' : (ti ? (ti.value || '') : '');
+      }
+      var lider = [];
+      tr.querySelectorAll('.li').forEach(function(inp, i) {
+        var v = (inp.value || '').trim();
+        if (v) lider.push((i === 0 ? '(T) ' : '(S) ') + v);
+      });
+      row.lider = lider.join('\n');
+      estado.rows.push(row);
+    });
+    sessionStorage.setItem('form_state_backup', JSON.stringify(estado));
+  } catch(e) {}
+}
+
+function restaurarEstadoFormulario() {
+  var saved = sessionStorage.getItem('form_state_backup');
+  if (!saved) return;
+  sessionStorage.removeItem('form_state_backup');
+  try {
+    var estado = JSON.parse(saved);
+    if (estado.projeto) {
+      var el = document.getElementById('input-projeto');
+      if (el) { el.value = estado.projeto; }
+    }
+    if (estado.rows && estado.rows.length > 0) {
+      var tbody = document.getElementById('tbody');
+      if (tbody) tbody.innerHTML = '';
+      estado.rows.forEach(function(row) { if (typeof addRow === 'function') addRow(row); });
+    }
+    updateFolderInfo();
+  } catch(e) {}
+}
+
 // Força o redirect de consentimento para o SharePoint (AllSites.Write)
 function forceSpConsent(pendingAction) {
   if (!msalApp || !currentAccount) return;
-  setStatus('&#128274; Redirecionando para autorização de escrita no SharePoint...');
+  setStatus('&#128274; Salvando estado e redirecionando para autorização...');
+  salvarEstadoFormulario();
   if (pendingAction) sessionStorage.setItem('sp_pending_action', pendingAction);
   // forceRefresh garante que Azure AD não reuse token cacheado sem o escopo
   msalApp.acquireTokenRedirect({ scopes: SP_SCOPES, account: currentAccount, forceRefresh: true });
@@ -291,6 +344,7 @@ function getSpToken(pendingAction) {
   return msalApp.acquireTokenSilent(req)
     .catch(function(e) {
       // Token silencioso falhou — precisa de consentimento interativo
+      salvarEstadoFormulario();
       if (pendingAction) sessionStorage.setItem('sp_pending_action', pendingAction);
       msalApp.acquireTokenRedirect(req);
       return new Promise(function() {});

@@ -192,8 +192,8 @@ var SP_API_BASE = SP_ORIGIN + SITE_REL + '/_api';
 
 // Login inicial: apenas identidade do usuário
 var LOGIN_SCOPES = ['User.Read'];
-// SharePoint: .default pede todos os acessos configurados para o recurso SP
-var SP_SCOPES    = [SP_ORIGIN + '/.default'];
+// SharePoint: escopo explícito para forçar consentimento correto de AllSites.Write
+var SP_SCOPES    = [SP_ORIGIN + '/AllSites.Write'];
 
 // ── MSAL ─────────────────────────────────────────────────────────────────────
 // IMPORTANTE: msalApp é null até msalInit() ser chamado com sucesso.
@@ -236,10 +236,17 @@ function msalInit() {
         if (accounts.length > 0) currentAccount = accounts[0];
       }
       updateAuthUI();
-      // Se retornou de um consentimento SharePoint, avisa o usuário
-      if (sessionStorage.getItem('sp_consent_pending') === '1') {
-        sessionStorage.removeItem('sp_consent_pending');
-        if (currentAccount) setStatus('✓ Acesso ao SharePoint autorizado. Tente salvar novamente.');
+      // Se retornou de um consentimento SharePoint, retoma a ação pendente automaticamente
+      var pendingAction = sessionStorage.getItem('sp_pending_action');
+      if (pendingAction) {
+        sessionStorage.removeItem('sp_pending_action');
+        if (currentAccount) {
+          setStatus('✓ Acesso ao SharePoint autorizado. Retomando ação...');
+          setTimeout(function() {
+            if (pendingAction === 'save') salvarSharePoint();
+            else if (pendingAction === 'load') abrirCarregarSP();
+          }, 800);
+        }
       }
     }).catch(function(e) {
       console.warn('MSAL redirect error:', e.message);
@@ -266,20 +273,21 @@ function authLogout() {
   msalApp.logoutRedirect({ account: currentAccount });
 }
 
-function getSpToken() {
+function getSpToken(pendingAction) {
   if (!msalApp)        return Promise.reject(new Error('MSAL não inicializou. Recarregue a página.'));
   if (!currentAccount) return Promise.reject(new Error('Faça login primeiro.'));
   var req = { scopes: SP_SCOPES, account: currentAccount };
   return msalApp.acquireTokenSilent(req)
     .catch(function(e) {
       // Token silencioso falhou — precisa de consentimento interativo
-      // Salva ação pendente e redireciona para consentimento
-      sessionStorage.setItem('sp_consent_pending', '1');
+      // Guarda qual ação estava pendente para retomar após o redirect
+      if (pendingAction) sessionStorage.setItem('sp_pending_action', pendingAction);
       msalApp.acquireTokenRedirect(req);
       // acquireTokenRedirect navega para fora — retorna promise que nunca resolve
       return new Promise(function() {});
     })
     .then(function(resp) {
+      if (!resp) return new Promise(function() {}); // navegando
       currentAccount = resp.account;
       return resp.accessToken;
     });
@@ -335,9 +343,15 @@ function spFetch(method, url, body, token) {
         var msg;
         try {
           var j = JSON.parse(t);
-          msg = (j.error && (j.error.message.value || j.error.message)) || r.statusText;
-        } catch(e) { msg = r.status + ' ' + r.statusText; }
-        throw new Error(msg);
+          var errObj = j.error || (j['odata.error']);
+          if (errObj) {
+            var m = errObj.message;
+            msg = (typeof m === 'object' ? m.value : m) || r.statusText;
+          } else {
+            msg = r.statusText;
+          }
+        } catch(e) { msg = t || r.statusText; }
+        throw new Error('HTTP ' + r.status + ': ' + msg);
       });
     }
     return r.json().catch(function() { return {}; });
@@ -443,7 +457,8 @@ function salvarSharePoint() {
   var filename   = ptSap + '.xlsx';
 
   setStatus('&#8987; Conectando ao SharePoint...');
-  getSpToken().then(function(token) {
+  getSpToken('save').then(function(token) {
+    if (!token) return; // redirecionando para consentimento
     setStatus('&#8987; Verificando estrutura de pastas...');
     return spEnsureFolder(folderPath, token).then(function() {
       setStatus('&#8987; Verificando arquivo existente...');
@@ -476,7 +491,8 @@ function abrirCarregarSP() {
   if (!proj) { alert('Preencha o nome do Projeto antes de carregar do SharePoint.'); return; }
 
   setStatus('&#8987; Buscando arquivos no SharePoint...');
-  getSpToken().then(function(token) {
+  getSpToken('load').then(function(token) {
+    if (!token) return; // redirecionando para consentimento
     var folderPath = getProjectFolderPath();
     return spListFiles(folderPath, token).then(function(files) {
       setStatus('');

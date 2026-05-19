@@ -4,8 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Gerenciamento de PT</title>
-<!-- MSAL.js 2.x — servido localmente (sem dependência de CDN externo) -->
-<script src="msal-browser.min.js"></script>
 <!-- Teams JS SDK (opcional — só ativa se rodando dentro do Teams) -->
 <script src="https://res.cdn.office.net/teams-js/2.22.0/js/MicrosoftTeams.min.js"></script>
 <style>
@@ -127,8 +125,7 @@ input[type=date].ci{min-width:110px}
   <div id="sidebar-header">&#128193; Sistema de Gestão</div>
   <div id="auth-panel">
     <div id="auth-bar">
-      <!-- Botão padrão — JS sobrescreve após MSAL carregar -->
-      <button class="auth-btn-login" onclick="authLogin()">&#128274; Entrar com Microsoft</button>
+      <div id="auth-user" style="font-size:10px;color:#95a5a6">Verificando...</div>
     </div>
     <div id="sp-folder-info" class="sp-folder-hint" style="display:none"></div>
   </div>
@@ -182,198 +179,54 @@ input[type=date].ci{min-width:110px}
 
 <script>
 // ── CONFIGURAÇÃO ─────────────────────────────────────────────────────────────
-// IDs do app registrado no Azure AD
-var CLIENT_ID  = '88f186ea-1637-4310-94d3-affeecbc493e';
-var TENANT_ID  = '3c43e06d-4815-433f-92b0-47c1d2e20798';
-
-// URL base do SharePoint
-var SP_ORIGIN  = 'https://fx3gestao.sharepoint.com';
-var SITE_REL   = '/sites/FX3GESTOLIDERANAEDESENVOLVIMENTOLTDA372';
-var LIBRARY    = 'Planejamento_Obras_RM_(ISAENERGIA)';
+var SP_ORIGIN   = 'https://fx3gestao.sharepoint.com';
+var SITE_REL    = '/sites/FX3GESTOLIDERANAEDESENVOLVIMENTOLTDA372';
+var LIBRARY     = 'Planejamento_Obras_RM_(ISAENERGIA)';
 var SP_API_BASE = SP_ORIGIN + SITE_REL + '/_api';
 
-// Login inicial: apenas identidade do usuário
-var LOGIN_SCOPES = ['User.Read'];
-// SharePoint: escopo explícito para forçar consentimento correto de AllSites.Write
-var SP_SCOPES    = [SP_ORIGIN + '/AllSites.Write'];
+// App funciona em qualquer origem; SP save/load exige hospedagem no domínio SharePoint
+var IS_SP_HOSTED = (window.location.origin === SP_ORIGIN);
 
-// ── MSAL ─────────────────────────────────────────────────────────────────────
-// IMPORTANTE: msalApp é null até msalInit() ser chamado com sucesso.
-// NÃO instanciar no nível global — se o CDN ainda não carregou, trava tudo.
-var msalApp = null;
-var currentAccount = null;
+// ── SHAREPOINT SESSION AUTH ───────────────────────────────────────────────────
+// Usa cookie de sessão do SharePoint — sem OAuth, sem admin consent.
+// Funciona quando hospedado em fx3gestao.sharepoint.com (ou Teams tab com URL SP).
+var spCurrentUser = null;
+var SP_DIGEST     = null;
 
-function msalInit() {
-
-  // Inicializa Teams SDK se disponível
+function spInit() {
   if (window.microsoftTeams) {
     try { microsoftTeams.app.initialize(); } catch(e) {}
   }
+  spLoadUser();
+}
 
-  // Usa window.msal explicitamente (mais seguro que a referência global)
-  var msalLib = window.msal;
-  if (!msalLib || typeof msalLib.PublicClientApplication !== 'function') {
+function spLoadUser() {
+  if (!IS_SP_HOSTED) { updateAuthUI(); return; }
+  fetch(SP_API_BASE + '/web/currentuser?$select=Title,LoginName', {
+    credentials: 'include',
+    headers: { 'Accept': 'application/json;odata=verbose' }
+  }).then(function(r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  }).then(function(data) {
+    spCurrentUser = (data && data.d) ? { name: data.d.Title, login: data.d.LoginName } : null;
     updateAuthUI();
-    return;
-  }
-
-  try {
-    msalApp = new msalLib.PublicClientApplication({
-      auth: {
-        clientId: CLIENT_ID,
-        authority: 'https://login.microsoftonline.com/' + TENANT_ID,
-        redirectUri: 'https://radioliveira.github.io/gerenciamento_pt/'
-      },
-      cache: {
-        cacheLocation: 'sessionStorage',
-        storeAuthStateInCookie: true
-      }
-    });
-
-    msalApp.handleRedirectPromise().then(function(resp) {
-      if (resp && resp.account) {
-        currentAccount = resp.account;
-      } else {
-        var accounts = msalApp.getAllAccounts();
-        if (accounts.length > 0) currentAccount = accounts[0];
-      }
-      updateAuthUI();
-      // Restaura estado do formulário se havia redirect de consentimento
-      restaurarEstadoFormulario();
-      // Retoma a ação pendente automaticamente após consentimento
-      var pendingAction = sessionStorage.getItem('sp_pending_action');
-      if (pendingAction) {
-        sessionStorage.removeItem('sp_pending_action');
-        if (currentAccount) {
-          setStatus('&#10003; Acesso ao SharePoint autorizado. Retomando ação...');
-          setTimeout(function() {
-            if (pendingAction === 'save') salvarSharePoint();
-            else if (pendingAction === 'load') abrirCarregarSP();
-          }, 1200);
-        }
-      }
-    }).catch(function(e) {
-      console.warn('MSAL redirect error:', e.message);
-      updateAuthUI();
-    });
-
-  } catch(e) {
-    msalDebug('ERRO ao criar PublicClientApplication: ' + e.message);
-    msalApp = null;
-    updateAuthUI();
-  }
+  }).catch(function() { spCurrentUser = null; updateAuthUI(); });
 }
 
-function authLogin() {
-  if (!msalApp) { alert('MSAL não inicializou. Recarregue a página (Ctrl+Shift+R).'); return; }
-  // Usa redirect flow — mais confiável em ambientes corporativos que popup
-  msalApp.loginRedirect({ scopes: LOGIN_SCOPES });
-}
-
-function authLogout() {
-  if (!msalApp) return;
-  currentAccount = null;
-  updateAuthUI();
-  msalApp.logoutRedirect({ account: currentAccount });
-}
-
-// ── SALVAR/RESTAURAR ESTADO DO FORMULÁRIO (para sobreviver ao redirect MSAL) ───
-
-function salvarEstadoFormulario() {
-  try {
-    var estado = {
-      projeto: (document.getElementById('input-projeto').value || '').trim(),
-      rows: []
-    };
-    document.querySelectorAll('#tbody tr').forEach(function(tr) {
-      var row = {};
-      ['di','hi','dt','ht','ei','ca','co','at','rd','er','ob','oc','ct','fr','sg','pp','ps'].forEach(function(col) {
-        var el = tr.querySelector('[data-col="' + col + '"]');
-        if (el) row[col] = el.value || '';
-      });
-      var tw = tr.querySelector('.tw');
-      if (tw) {
-        var ts = tw.querySelector('select'), ti = tw.querySelector('input');
-        row.tempo = (ts && ts.value === 'I') ? 'Indisponível' : (ti ? (ti.value || '') : '');
-      }
-      var lider = [];
-      tr.querySelectorAll('.li').forEach(function(inp, i) {
-        var v = (inp.value || '').trim();
-        if (v) lider.push((i === 0 ? '(T) ' : '(S) ') + v);
-      });
-      row.lider = lider.join('\n');
-      estado.rows.push(row);
-    });
-    sessionStorage.setItem('form_state_backup', JSON.stringify(estado));
-  } catch(e) {}
-}
-
-function restaurarEstadoFormulario() {
-  var saved = sessionStorage.getItem('form_state_backup');
-  if (!saved) return;
-  sessionStorage.removeItem('form_state_backup');
-  try {
-    var estado = JSON.parse(saved);
-    if (estado.projeto) {
-      var el = document.getElementById('input-projeto');
-      if (el) { el.value = estado.projeto; }
-    }
-    if (estado.rows && estado.rows.length > 0) {
-      var tbody = document.getElementById('tbody');
-      if (tbody) tbody.innerHTML = '';
-      estado.rows.forEach(function(row) { if (typeof addRow === 'function') addRow(row); });
-    }
-    updateFolderInfo();
-  } catch(e) {}
-}
-
-// URL de admin consent para o administrador Microsoft 365 aprovar AllSites.Write
-var ADMIN_CONSENT_URL = 'https://login.microsoftonline.com/' + TENANT_ID
-  + '/adminconsent?client_id=' + CLIENT_ID
-  + '&redirect_uri=' + encodeURIComponent('https://radioliveira.github.io/gerenciamento_pt/');
-
-// Mostra a URL de admin consent quando o redirect não resolver o 403
-function mostrarAdminConsentUrl() {
-  alert('Permissão de escrita BLOQUEADA pelo tenant.\n\n'
-    + 'O administrador Microsoft 365 precisa aprovar o acesso.\n\n'
-    + 'Copie e envie o link abaixo para o administrador:\n\n'
-    + ADMIN_CONSENT_URL
-    + '\n\nApós o admin aprovar, você poderá salvar normalmente.');
-}
-
-// Força o redirect de consentimento para o SharePoint (AllSites.Write)
-// prompt:'consent' garante que a tela de consentimento apareça (não usa SSO silencioso)
-function forceSpConsent(pendingAction) {
-  if (!msalApp || !currentAccount) return;
-  setStatus('&#128274; Redirecionando para tela de autorização...');
-  salvarEstadoFormulario();
-  if (pendingAction) sessionStorage.setItem('sp_pending_action', pendingAction);
-  // Marca que já tentamos o redirect — se der 403 de novo, mostramos URL de admin
-  sessionStorage.setItem('sp_consent_attempted', '1');
-  msalApp.acquireTokenRedirect({
-    scopes: SP_SCOPES,
-    account: currentAccount,
-    prompt: 'consent'   // força exibição da tela de consentimento, ignora SSO cache
+function getSpDigest() {
+  if (SP_DIGEST) return Promise.resolve(SP_DIGEST);
+  return fetch(SP_API_BASE + '/contextinfo', {
+    method: 'POST', credentials: 'include',
+    headers: { 'Accept': 'application/json;odata=verbose', 'Content-Length': '0' }
+  }).then(function(r) {
+    if (!r.ok) throw new Error('Erro digest: HTTP ' + r.status);
+    return r.json();
+  }).then(function(data) {
+    SP_DIGEST = data.d.GetContextWebInformation.FormDigestValue;
+    setTimeout(function() { SP_DIGEST = null; }, 25 * 60 * 1000);
+    return SP_DIGEST;
   });
-}
-
-function getSpToken(pendingAction) {
-  if (!msalApp)        return Promise.reject(new Error('MSAL não inicializou. Recarregue a página.'));
-  if (!currentAccount) return Promise.reject(new Error('Faça login primeiro.'));
-  var req = { scopes: SP_SCOPES, account: currentAccount };
-  return msalApp.acquireTokenSilent(req)
-    .catch(function(e) {
-      // Token silencioso falhou — precisa de consentimento interativo
-      salvarEstadoFormulario();
-      if (pendingAction) sessionStorage.setItem('sp_pending_action', pendingAction);
-      msalApp.acquireTokenRedirect(req);
-      return new Promise(function() {});
-    })
-    .then(function(resp) {
-      if (!resp) return new Promise(function() {}); // navegando
-      currentAccount = resp.account;
-      return resp.accessToken;
-    });
 }
 
 function updateAuthUI() {
@@ -381,18 +234,15 @@ function updateAuthUI() {
   var spSave = document.getElementById('btn-sp-save');
   var spLoad = document.getElementById('btn-sp-load');
   if (!bar) return;
-
-  if (currentAccount) {
-    var name = currentAccount.name || currentAccount.username || 'Usuário';
-    bar.innerHTML =
-      '<div id="auth-user">&#128100; ' + escHtml(name) + '</div>'
-      + '<button class="auth-btn-consent" onclick="forceSpConsent(\'\')" title="Clique se receber erro de acesso negado ao salvar/carregar">&#128275; Autorizar Escrita SP</button>'
-      + '<button class="auth-btn-logout" onclick="authLogout()">Sair da conta Microsoft</button>';
+  if (spCurrentUser) {
+    bar.innerHTML = '<div id="auth-user">&#128100; ' + escHtml(spCurrentUser.name) + '</div>';
     if (spSave) spSave.disabled = false;
     if (spLoad) spLoad.disabled = false;
     updateFolderInfo();
   } else {
-    bar.innerHTML = '<button class="auth-btn-login" onclick="authLogin()">&#128274; Entrar com Microsoft</button>';
+    bar.innerHTML = IS_SP_HOSTED
+      ? '<div id="auth-user" style="color:#e67e22;font-size:10px">&#8987; Carregando...</div>'
+      : '<div id="auth-user" style="color:#95a5a6;font-size:10px">&#9888; Abra pelo SharePoint para salvar na nuvem</div>';
     if (spSave) spSave.disabled = true;
     if (spLoad) spLoad.disabled = true;
     var fi = document.getElementById('sp-folder-info');
@@ -402,104 +252,75 @@ function updateAuthUI() {
 
 // ── SHAREPOINT REST API ───────────────────────────────────────────────────────
 
-// Escapa caminho para o parâmetro decodedurl do SharePoint REST API
 function spParam(path) {
   return encodeURIComponent("'" + path.replace(/'/g, "''") + "'");
 }
 
-function spFetch(method, url, body, token) {
+function spFetch(method, url, body) {
   var isRaw = body && (body instanceof ArrayBuffer || ArrayBuffer.isView(body));
-  var headers = {
-    'Authorization': 'Bearer ' + token,
-    'Accept': 'application/json;odata=verbose'
-  };
-  var opts = { method: method, headers: headers };
-  if (isRaw) {
-    headers['Content-Type'] = 'application/octet-stream';
-    opts.body = body;
-  } else if (body !== null && body !== undefined) {
-    headers['Content-Type'] = 'application/json;odata=verbose';
-    opts.body = JSON.stringify(body);
-  }
-  return fetch(url, opts).then(function(r) {
-    if (!r.ok) {
-      return r.text().then(function(t) {
+  var headers = { 'Accept': 'application/json;odata=verbose' };
+  var opts = { method: method, headers: headers, credentials: 'include' };
+  function doFetch(digest) {
+    if (digest) headers['X-RequestDigest'] = digest;
+    if (isRaw) {
+      headers['Content-Type'] = 'application/octet-stream'; opts.body = body;
+    } else if (body !== null && body !== undefined) {
+      headers['Content-Type'] = 'application/json;odata=verbose'; opts.body = JSON.stringify(body);
+    }
+    return fetch(url, opts).then(function(r) {
+      if (!r.ok) return r.text().then(function(t) {
         var msg;
         try {
-          var j = JSON.parse(t);
-          var errObj = j.error || (j['odata.error']);
-          if (errObj) {
-            var m = errObj.message;
-            msg = (typeof m === 'object' ? m.value : m) || r.statusText;
-          } else {
-            msg = r.statusText;
-          }
+          var j = JSON.parse(t), errObj = j.error || j['odata.error'];
+          if (errObj) { var m = errObj.message; msg = (typeof m === 'object' ? m.value : m) || r.statusText; }
+          else msg = r.statusText;
         } catch(e) { msg = t || r.statusText; }
         throw new Error('HTTP ' + r.status + ': ' + msg);
       });
-    }
-    return r.json().catch(function() { return {}; });
-  });
+      return r.json().catch(function() { return {}; });
+    });
+  }
+  return (method !== 'GET' && method !== 'HEAD') ? getSpDigest().then(doFetch) : doFetch(null);
 }
 
-function spGet(endpoint, token) {
-  var url = endpoint.startsWith('http') ? endpoint : SP_API_BASE + '/' + endpoint;
-  return spFetch('GET', url, null, token);
+function spGet(endpoint) {
+  return spFetch('GET', endpoint.startsWith('http') ? endpoint : SP_API_BASE + '/' + endpoint, null);
+}
+function spPost(endpoint, body) {
+  return spFetch('POST', endpoint.startsWith('http') ? endpoint : SP_API_BASE + '/' + endpoint, body);
 }
 
-function spPost(endpoint, body, token) {
-  var url = endpoint.startsWith('http') ? endpoint : SP_API_BASE + '/' + endpoint;
-  return spFetch('POST', url, body, token);
+function spFolderExists(serverRelPath) {
+  return spGet('web/GetFolderByServerRelativePath(decodedurl=@p)?@p=' + spParam(serverRelPath) + '&$select=Exists')
+    .then(function() { return true; }).catch(function() { return false; });
 }
-
-function spFolderExists(serverRelPath, token) {
-  var ep = 'web/GetFolderByServerRelativePath(decodedurl=@p)?@p=' + spParam(serverRelPath) + '&$select=Exists';
-  return spGet(ep, token)
-    .then(function() { return true; })
-    .catch(function() { return false; });
+function spCreateFolder(serverRelPath) {
+  return spPost('web/folders', { '__metadata': { 'type': 'SP.Folder' }, 'ServerRelativeUrl': serverRelPath });
 }
-
-function spCreateFolder(serverRelPath, token) {
-  return spPost('web/folders', {
-    '__metadata': { 'type': 'SP.Folder' },
-    'ServerRelativeUrl': serverRelPath
-  }, token);
-}
-
-function spEnsureFolder(serverRelPath, token) {
-  // Não tenta criar nada acima da biblioteca
+function spEnsureFolder(serverRelPath) {
   var libRoot = SITE_REL + '/' + LIBRARY;
   if (!serverRelPath.startsWith(libRoot)) return Promise.resolve();
-
-  return spFolderExists(serverRelPath, token).then(function(exists) {
+  return spFolderExists(serverRelPath).then(function(exists) {
     if (exists) return;
     var parts = serverRelPath.replace(/\/$/, '').split('/');
     var parent = parts.slice(0, -1).join('/');
-    return spEnsureFolder(parent, token).then(function() {
-      return spCreateFolder(serverRelPath, token);
-    });
+    return spEnsureFolder(parent).then(function() { return spCreateFolder(serverRelPath); });
   });
 }
-
-function spListFiles(folderServerRelPath, token) {
-  var ep = 'web/GetFolderByServerRelativePath(decodedurl=@p)/Files?@p=' + spParam(folderServerRelPath)
-    + '&$select=Name,ServerRelativeUrl,TimeLastModified&$orderby=TimeLastModified%20desc';
-  return spGet(ep, token).then(function(data) {
-    return (data.d && data.d.results) ? data.d.results : [];
-  });
+function spListFiles(folderServerRelPath) {
+  return spGet('web/GetFolderByServerRelativePath(decodedurl=@p)/Files?@p=' + spParam(folderServerRelPath)
+    + '&$select=Name,ServerRelativeUrl,TimeLastModified&$orderby=TimeLastModified%20desc')
+    .then(function(data) { return (data.d && data.d.results) ? data.d.results : []; });
 }
-
-function spUploadFile(folderServerRelPath, filename, content, token) {
+function spUploadFile(folderServerRelPath, filename, content) {
   var url = SP_API_BASE + '/web/GetFolderByServerRelativePath(decodedurl=@p)/Files/add(url=@fn,overwrite=true)'
-    + '?@p=' + spParam(folderServerRelPath)
-    + '&@fn=' + spParam(filename);
-  return spPost(url, content, token);
+    + '?@p=' + spParam(folderServerRelPath) + '&@fn=' + spParam(filename);
+  return spPost(url, content);
 }
-
-function spDownloadFile(serverRelUrl, token) {
+function spDownloadFile(serverRelUrl) {
   var url = SP_ORIGIN + '/_api/web/GetFileByServerRelativePath(decodedurl=@p)/$value?@p=' + spParam(serverRelUrl);
-  return fetch(url, { headers: { 'Authorization': 'Bearer ' + token } }).then(function(r) {
-    if (!r.ok) throw new Error('Download falhou: ' + r.status + ' ' + r.statusText);
+  return fetch(url, { credentials: 'include' }).then(function(r) {
+    if (!r.ok) throw new Error('Download falhou: ' + r.status);
     return r.arrayBuffer();
   });
 }
@@ -514,174 +335,122 @@ function getProjectFolderPath() {
 
 function updateFolderInfo() {
   var fi = document.getElementById('sp-folder-info');
-  if (!fi || !currentAccount) return;
-  var p = getProjectFolderPath();
-  if (p) {
+  if (!fi || !spCurrentUser) return;
+  var proj = (document.getElementById('input-projeto').value || '').trim();
+  if (proj) {
     fi.style.display = 'block';
-    fi.textContent = '&#128193; ' + LIBRARY + '/' + (document.getElementById('input-projeto').value||'').trim() + '/Gerenciamento PT';
+    fi.textContent = '\u{1F4C1} ' + LIBRARY + '/' + proj + '/Gerenciamento PT';
   } else {
     fi.style.display = 'none';
   }
 }
 
 function salvarSharePoint() {
-  var proj  = (document.getElementById('input-projeto').value || '').trim();
+  if (!IS_SP_HOSTED) {
+    alert('Para salvar no SharePoint, acesse o app pelo link do SharePoint ou pelo Teams.\n\nFuncionalidade local (Baixar) continua disponível.');
+    return;
+  }
+  var proj = (document.getElementById('input-projeto').value || '').trim();
   if (!proj) { alert('Preencha o nome do Projeto antes de salvar.'); return; }
   var ptSap = getPTSAP();
   if (!ptSap) { alert('Preencha o campo PT SAP em pelo menos uma linha para nomear o arquivo.'); return; }
 
-  var titulo  = document.getElementById('titulo-doc').textContent || '';
-  var rows    = coletarLinhas();
-  var b64     = gerarXLSXBase64(titulo, rows);
-  var binary  = atob(b64);
-  var bytes   = new Uint8Array(binary.length);
+  var titulo = document.getElementById('titulo-doc').textContent || '';
+  var rows   = coletarLinhas();
+  var b64    = gerarXLSXBase64(titulo, rows);
+  var binary = atob(b64);
+  var bytes  = new Uint8Array(binary.length);
   for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
 
   var folderPath = getProjectFolderPath();
   var filename   = ptSap + '.xlsx';
 
-  setStatus('&#8987; Conectando ao SharePoint...');
-  getSpToken('save').then(function(token) {
-    if (!token) return; // redirecionando para consentimento
-    setStatus('&#8987; Verificando estrutura de pastas...');
-    return spEnsureFolder(folderPath, token).then(function() {
-      setStatus('&#8987; Verificando arquivo existente...');
-      return spListFiles(folderPath, token).then(function(files) {
-        var exists = files.some(function(f) { return f.Name === filename; });
-        var targetName = filename;
-
-        if (exists) {
-          var choice = confirm('"' + filename + '" já existe no SharePoint.\n\nOK = Substituir\nCancelar = Salvar como cópia');
-          if (!choice) {
-            var ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 16);
-            targetName = ptSap + '_' + ts + '.xlsx';
-          }
+  setStatus('&#8987; Verificando pastas no SharePoint...');
+  spEnsureFolder(folderPath).then(function() {
+    return spListFiles(folderPath).then(function(files) {
+      var exists = files.some(function(f) { return f.Name === filename; });
+      var targetName = filename;
+      if (exists) {
+        var choice = confirm('"' + filename + '" já existe.\n\nOK = Substituir\nCancelar = Salvar como cópia');
+        if (!choice) {
+          var ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 16);
+          targetName = ptSap + '_' + ts + '.xlsx';
         }
-
-        setStatus('&#8987; Enviando "' + targetName + '"...');
-        return spUploadFile(folderPath, targetName, bytes.buffer, token).then(function() {
-          setStatus('&#10003; Salvo no SharePoint: ' + targetName);
-        });
+      }
+      setStatus('&#8987; Enviando "' + targetName + '"...');
+      return spUploadFile(folderPath, targetName, bytes.buffer).then(function() {
+        setStatus('&#10003; Salvo no SharePoint: ' + targetName);
       });
     });
   }).catch(function(e) {
     setStatus('');
-    var msg = e.message || '';
-    var is403 = msg.indexOf('403') !== -1 || msg.toLowerCase().indexOf('acesso negado') !== -1 || msg.toLowerCase().indexOf('access denied') !== -1;
-    if (is403) {
-      var jaAttempted = sessionStorage.getItem('sp_consent_attempted');
-      sessionStorage.removeItem('sp_consent_attempted');
-      if (jaAttempted) {
-        // Redirect de consentimento já foi feito e ainda deu 403 → precisa de admin consent
-        mostrarAdminConsentUrl();
-      } else {
-        if (confirm('Acesso negado (403) ao gravar no SharePoint.\n\n'
-          + 'O aplicativo ainda não recebeu permissão de ESCRITA.\n\n'
-          + 'Clique OK para abrir a tela de autorização da Microsoft.\n'
-          + 'Após autorizar, o arquivo será salvo automaticamente.')) {
-          forceSpConsent('save');
-        }
-      }
-    } else {
-      alert('Erro ao salvar no SharePoint:\n\n' + msg);
-    }
+    alert('Erro ao salvar no SharePoint:\n\n' + e.message);
   });
 }
 
 function abrirCarregarSP() {
+  if (!IS_SP_HOSTED) {
+    alert('Para carregar do SharePoint, acesse o app pelo link do SharePoint ou pelo Teams.');
+    return;
+  }
   var proj = (document.getElementById('input-projeto').value || '').trim();
   if (!proj) { alert('Preencha o nome do Projeto antes de carregar do SharePoint.'); return; }
 
   setStatus('&#8987; Buscando arquivos no SharePoint...');
-  getSpToken('load').then(function(token) {
-    if (!token) return; // redirecionando para consentimento
-    var folderPath = getProjectFolderPath();
-    return spListFiles(folderPath, token).then(function(files) {
-      setStatus('');
-      var descEl = document.getElementById('sp-load-desc');
-      if (descEl) descEl.textContent = 'Pasta: ' + proj + '/Gerenciamento PT';
-
-      var list = document.getElementById('sp-file-list');
-      list.innerHTML = '';
-
-      if (!files.length) {
-        list.innerHTML = '<div style="padding:12px;color:#888;font-size:12px">Nenhum arquivo encontrado nesta pasta.</div>';
-        openModal('mdl-sp-load');
-        return;
-      }
-
-      files.forEach(function(f) {
-        var dt = parseSpDate(f.TimeLastModified);
-        var div = document.createElement('div');
-        div.className = 'fi';
-        div.innerHTML = '<span style="font-size:18px">&#128196;</span>'
-          + '<div style="flex:1">'
-          +   '<div style="font-weight:bold;font-size:12px">' + escHtml(f.Name) + '</div>'
-          +   '<div style="font-size:11px;color:#888">' + dt + '</div>'
-          + '</div>';
-        var url = f.ServerRelativeUrl;
-        div.onclick = function() {
-          closeModal('mdl-sp-load');
-          carregarDoSP(url);
-        };
-        list.appendChild(div);
-      });
-      openModal('mdl-sp-load');
+  spListFiles(getProjectFolderPath()).then(function(files) {
+    setStatus('');
+    var descEl = document.getElementById('sp-load-desc');
+    if (descEl) descEl.textContent = 'Pasta: ' + proj + '/Gerenciamento PT';
+    var list = document.getElementById('sp-file-list');
+    list.innerHTML = '';
+    if (!files.length) {
+      list.innerHTML = '<div style="padding:12px;color:#888;font-size:12px">Nenhum arquivo encontrado nesta pasta.</div>';
+      openModal('mdl-sp-load'); return;
+    }
+    files.forEach(function(f) {
+      var dt = parseSpDate(f.TimeLastModified);
+      var div = document.createElement('div');
+      div.className = 'fi';
+      div.innerHTML = '<span style="font-size:18px">&#128196;</span>'
+        + '<div style="flex:1"><div style="font-weight:bold;font-size:12px">' + escHtml(f.Name) + '</div>'
+        + '<div style="font-size:11px;color:#888">' + dt + '</div></div>';
+      var url = f.ServerRelativeUrl;
+      div.onclick = function() { closeModal('mdl-sp-load'); carregarDoSP(url); };
+      list.appendChild(div);
     });
+    openModal('mdl-sp-load');
   }).catch(function(e) {
     setStatus('');
     var msg = e.message || '';
-    var is403 = msg.indexOf('403') !== -1 || msg.toLowerCase().indexOf('acesso negado') !== -1 || msg.toLowerCase().indexOf('access denied') !== -1;
-    if (is403) {
-      var jaAttempted = sessionStorage.getItem('sp_consent_attempted');
-      sessionStorage.removeItem('sp_consent_attempted');
-      if (jaAttempted) {
-        mostrarAdminConsentUrl();
-      } else {
-        if (confirm('Acesso negado (403) ao ler o SharePoint.\n\n'
-          + 'O aplicativo ainda não recebeu permissão de acesso.\n\n'
-          + 'Clique OK para abrir a tela de autorização da Microsoft.\n'
-          + 'Após autorizar, a listagem será retomada automaticamente.')) {
-          forceSpConsent('load');
-        }
-      }
-    } else if (msg.indexOf('404') !== -1 || msg.indexOf('does not exist') !== -1) {
-      alert('Pasta não encontrada no SharePoint.\nSalve um arquivo primeiro para criar a estrutura de pastas.');
-    } else {
+    if (msg.indexOf('404') !== -1 || msg.indexOf('does not exist') !== -1)
+      alert('Pasta não encontrada.\nSalve um arquivo primeiro para criar a estrutura de pastas.');
+    else
       alert('Erro ao buscar arquivos:\n\n' + msg);
-    }
   });
 }
 
 function carregarDoSP(serverRelUrl) {
   setStatus('&#8987; Baixando arquivo do SharePoint...');
-  getSpToken().then(function(token) {
-    return spDownloadFile(serverRelUrl, token).then(function(buf) {
-      try {
-        var data = parseXLSX(buf);
-        if (!data || data.length < 2) { alert('Arquivo incompatível.'); return; }
-        document.getElementById('titulo-doc').textContent = String(data[0]&&data[0][0]?data[0][0]:'SEM TÍTULO');
-        document.getElementById('tbody').innerHTML = '';
-        var count = 0;
-        for (var i = 2; i < data.length; i++) {
-          var r = data[i];
-          if (!r || r.every(function(c) { return !String(c||'').trim(); })) continue;
-          addRow({di:r[0],hi:r[1],dt:r[2],ht:r[3],ei:r[4],ca:r[5],co:r[6],at:r[7],
-            rd:r[8],er:r[9],tempo:r[10],ob:r[11],oc:r[12],ct:r[13],fr:r[14],
-            sg:r[15],pp:r[16],ps:r[17],lider:r[18]});
-          count++;
-        }
-        if (!count) addRow({});
-        var fname = serverRelUrl.split('/').pop();
-        setStatus('&#10003; Carregado do SharePoint: ' + fname + ' (' + count + ' linha' + (count!==1?'s':'') + ')');
-      } catch(err) {
-        alert('Erro ao processar arquivo: ' + err.message);
+  spDownloadFile(serverRelUrl).then(function(buf) {
+    try {
+      var data = parseXLSX(buf);
+      if (!data || data.length < 2) { alert('Arquivo incompatível.'); return; }
+      document.getElementById('titulo-doc').textContent = String(data[0]&&data[0][0]?data[0][0]:'SEM TÍTULO');
+      document.getElementById('tbody').innerHTML = '';
+      var count = 0;
+      for (var i = 2; i < data.length; i++) {
+        var r = data[i];
+        if (!r || r.every(function(c) { return !String(c||'').trim(); })) continue;
+        addRow({di:r[0],hi:r[1],dt:r[2],ht:r[3],ei:r[4],ca:r[5],co:r[6],at:r[7],
+          rd:r[8],er:r[9],tempo:r[10],ob:r[11],oc:r[12],ct:r[13],fr:r[14],
+          sg:r[15],pp:r[16],ps:r[17],lider:r[18]});
+        count++;
       }
-    });
-  }).catch(function(e) {
-    setStatus('');
-    alert('Erro ao carregar do SharePoint:\n\n' + e.message);
-  });
+      if (!count) addRow({});
+      var fname = serverRelUrl.split('/').pop();
+      setStatus('&#10003; Carregado: ' + fname + ' (' + count + ' linha' + (count!==1?'s':'') + ')');
+    } catch(err) { alert('Erro ao processar arquivo: ' + err.message); }
+  }).catch(function(e) { setStatus(''); alert('Erro ao carregar:\n\n' + e.message); });
 }
 
 function parseSpDate(v) {
@@ -1090,7 +859,7 @@ document.addEventListener('mouseup',function(){if(!isR)return;isR=false;document
 // Startup
 window.onload = function(){
   addRow({});
-  msalInit();
+  spInit();
 };
 </script>
 </body>
